@@ -6,7 +6,10 @@ import (
 	"block-explorer-backend/internal/controller"
 )
 
-func NewRouter(txController *controller.TxController) *gin.Engine {
+func NewRouter(
+	txController *controller.TxController,
+	blockController *controller.BlockController,
+) *gin.Engine {
 	r := gin.Default()
 
 	r.GET("/health", func(c *gin.Context) {
@@ -15,7 +18,14 @@ func NewRouter(txController *controller.TxController) *gin.Engine {
 		})
 	})
 
-	r.GET("/tx/:hash", txController.GetTx)
+	txGroup := r.Group("/tx")
+	{
+		txGroup.GET("/:hash", txController.GetTx)
+	}
 
+	blockGroup := r.Group("/block")
+	{
+		blockGroup.GET("/:number", blockController.GetBlock)
+	}
 	return r
 }

@@ -16,16 +16,23 @@ func Run() error {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	ethClient, err := rpc.NewEthClient(cfg.Ethereum.RPCURL)
+	ethClient, err := rpc.NewEthClient(cfg.Rpc.RPCURL)
 	if err != nil {
 		return fmt.Errorf("new eth client: %w", err)
 	}
 
-	txRPC := rpc.NewTxRPC(ethClient, cfg.Ethereum.TimeoutSeconds)
+	txRPC := rpc.NewTxRPC(ethClient, cfg.Rpc.TimeoutSeconds)
 	txService := service.NewTxService(txRPC)
 	txController := controller.NewTxController(txService)
 
-	router := api.NewRouter(txController)
+	blockRPC := rpc.NewBlockRPC(ethClient, cfg.Rpc.TimeoutSeconds)
+	blockService := service.NewBlockService(blockRPC)
+	blockController := controller.NewBlockController(blockService)
+
+	router := api.NewRouter(
+		txController,
+		blockController,
+	)
 
 	addr := ":" + cfg.Server.Port
 	return router.Run(addr)

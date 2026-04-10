@@ -46,22 +46,22 @@ func (ctl *TxController) GetTx(c *gin.Context) {
 
 	if err != nil {
 		statusCode := http.StatusInternalServerError
+		message := "internal server error"
 
 		switch {
 		// Invalid input (e.g. malformed hash) → 400 Bad Request
 		case errors.Is(err, types.ErrInvalidTxHash):
 			statusCode = http.StatusBadRequest
+			message = "invalid tx hash"
 		case errors.Is(err, types.ErrTxNotFound):
 			statusCode = http.StatusNotFound
-		// Default: internal error → 500 Internal Server Error
-		default:
-			statusCode = http.StatusInternalServerError
+			message = "transaction not found"
 		}
 
 		// Return standardized error response
 		c.JSON(statusCode, types.ErrorResponse{
 			Code:    statusCode,
-			Message: err.Error(),
+			Message: message,
 		})
 		return
 	}

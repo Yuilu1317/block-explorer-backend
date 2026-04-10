@@ -59,7 +59,7 @@ func (r *TxRPC) GetTransactionByHash(ctx context.Context, hash string) (*types.T
 
 	var receiptStatus *uint64
 	var gasUsed *uint64
-	var blockNumber *string
+	var blockNumber *uint64
 
 	if !isPending {
 		receipt, err := r.client.TransactionReceipt(ctx, txHash)
@@ -74,7 +74,7 @@ func (r *TxRPC) GetTransactionByHash(ctx context.Context, hash string) (*types.T
 		gasUsed = &used
 
 		if receipt.BlockNumber != nil {
-			bn := receipt.BlockNumber.String()
+			bn := receipt.BlockNumber.Uint64()
 			blockNumber = &bn
 		}
 	}

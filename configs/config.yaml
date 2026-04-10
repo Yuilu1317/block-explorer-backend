@@ -1,6 +1,6 @@
 server:
   port: "8080"
 
-ethereum:
+rpc:
   rpc_url: "https://ethereum-rpc.publicnode.com"
   timeout_seconds: 10

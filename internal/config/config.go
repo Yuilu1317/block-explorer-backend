@@ -8,15 +8,15 @@ import (
 )
 
 type Config struct {
-	Server   ServerConfig   `yaml:"server"`
-	Ethereum EthereumConfig `yaml:"ethereum"`
+	Server ServerConfig `yaml:"server"`
+	Rpc    RpcConfig    `yaml:"rpc"`
 }
 
 type ServerConfig struct {
 	Port string `yaml:"port"`
 }
 
-type EthereumConfig struct {
+type RpcConfig struct {
 	RPCURL         string `yaml:"rpc_url"`
 	TimeoutSeconds int    `yaml:"timeout_seconds"`
 }
@@ -35,8 +35,11 @@ func Load(path string) (*Config, error) {
 	if cfg.Server.Port == "" {
 		cfg.Server.Port = "8080"
 	}
-	if cfg.Ethereum.TimeoutSeconds <= 0 {
-		cfg.Ethereum.TimeoutSeconds = 10
+	if cfg.Rpc.RPCURL == "" {
+		return nil, fmt.Errorf("rpc.rpc_url is required")
+	}
+	if cfg.Rpc.TimeoutSeconds <= 0 {
+		cfg.Rpc.TimeoutSeconds = 10
 	}
 
 	return &cfg, nil
