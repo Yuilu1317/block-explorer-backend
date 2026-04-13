@@ -26,20 +26,14 @@ func NewBlockService(blockRPC BlockRPC) *BlockService {
 func (s *BlockService) GetBlockByNumber(ctx context.Context, number uint64) (*types.BlockDetailDTO, error) {
 	block, err := s.blockRPC.GetBlockByNumber(ctx, number)
 	if err != nil {
-		switch {
-		case errors.Is(err, context.DeadlineExceeded),
-			errors.Is(err, context.Canceled):
-			return nil, types.ErrRPCTimeout
-
-		case errors.Is(err, ethereum.NotFound):
+		if errors.Is(err, ethereum.NotFound) {
 			return nil, types.ErrBlockNotFound
-
-		default:
-			return nil, err
 		}
+		return nil, mapRPCError(err)
 	}
 	return s.toBlockRawDTO(block), nil
 }
+
 func (s *BlockService) toBlockRawDTO(block *ethtypes.Block) *types.BlockDetailDTO {
 	return &types.BlockDetailDTO{
 		Number:     block.NumberU64(),

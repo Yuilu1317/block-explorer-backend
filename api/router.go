@@ -9,6 +9,7 @@ import (
 func NewRouter(
 	txController *controller.TxController,
 	blockController *controller.BlockController,
+	addressController *controller.AddressController,
 ) *gin.Engine {
 	r := gin.Default()
 
@@ -27,5 +28,11 @@ func NewRouter(
 	{
 		blockGroup.GET("/:number", blockController.GetBlock)
 	}
+
+	addressGroup := r.Group("/address")
+	{
+		addressGroup.GET("/:address", addressController.GetAddress)
+	}
+
 	return r
 }

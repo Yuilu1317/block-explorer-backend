@@ -2,49 +2,94 @@ package service
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"math/big"
 	"strings"
 
 	"block-explorer-backend/internal/types"
 	"block-explorer-backend/internal/utils"
+
+	"github.com/ethereum/go-ethereum"
 )
 
-// TxRPC defines the RPC capability required by the service layer.
-// The concrete implementation is provided by the rpc layer.
 type TxRPC interface {
-	GetTransactionByHash(ctx context.Context, hash string) (*types.TxDetailDTO, error)
+	GetTransactionByHash(ctx context.Context, hash string) (*types.TxRaw, error)
 }
 
-// TxService handles transaction-related business logic.
-// It depends on the RPC abstraction rather than a concrete implementation.
 type TxService struct {
 	// txRPC is the RPC dependency used to fetch transaction data from the blockchain
 	txRPC TxRPC
 }
 
-// NewTxService creates and initializes a TxService instance.
 func NewTxService(txRPC TxRPC) *TxService {
 	return &TxService{
 		txRPC: txRPC,
 	}
 }
 
-// GetTxByHash validates the input hash, calls the RPC layer,
-// and returns the transaction details if found.
 func (s *TxService) GetTxByHash(ctx context.Context, hash string) (*types.TxDetailDTO, error) {
-	// Remove leading and trailing whitespace from the input hash.
 	hash = strings.TrimSpace(hash)
 
-	// Validate whether the transaction hash format is correct.
 	if err := utils.ValidateTxHash(hash); err != nil {
-		return nil, err
+		return nil, types.ErrInvalidTxHash
 	}
 
-	// Query the transaction details from the RPC layer.
-	tx, err := s.txRPC.GetTransactionByHash(ctx, hash)
+	raw, err := s.txRPC.GetTransactionByHash(ctx, hash)
 	if err != nil {
-		return nil, err
+		if errors.Is(err, ethereum.NotFound) {
+			return nil, types.ErrTxNotFound
+		}
+		return nil, mapRPCError(err)
 	}
 
-	// Return the transaction details to the upper layer.
-	return tx, nil
+	return s.toTxDetailDTO(raw), nil
+}
+
+func (s *TxService) toTxDetailDTO(raw *types.TxRaw) *types.TxDetailDTO {
+	tx := raw.Tx
+
+	to := ""
+	if tx.To() != nil {
+		to = tx.To().Hex()
+	}
+
+	gasPriceWei := tx.GasPrice()
+	if gasPriceWei == nil {
+		gasPriceWei = big.NewInt(0)
+	}
+
+	var (
+		status      *uint64
+		gasUsed     *uint64
+		blockNumber *uint64
+	)
+
+	if raw.Receipt != nil {
+		receiptStatus := raw.Receipt.Status
+		status = &receiptStatus
+
+		used := raw.Receipt.GasUsed
+		gasUsed = &used
+
+		if raw.Receipt.BlockNumber != nil {
+			bn := raw.Receipt.BlockNumber.Uint64()
+			blockNumber = &bn
+		}
+	}
+
+	return &types.TxDetailDTO{
+		Hash:        tx.Hash().Hex(),
+		From:        raw.From,
+		To:          to,
+		ValueWei:    tx.Value().String(),
+		Nonce:       tx.Nonce(),
+		GasLimit:    tx.Gas(),
+		GasPriceWei: gasPriceWei.String(),
+		Data:        fmt.Sprintf("0x%x", tx.Data()),
+		IsPending:   raw.IsPending,
+		BlockNumber: blockNumber,
+		Status:      status,
+		GasUsed:     gasUsed,
+	}
 }

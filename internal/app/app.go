@@ -29,9 +29,14 @@ func Run() error {
 	blockService := service.NewBlockService(blockRPC)
 	blockController := controller.NewBlockController(blockService)
 
+	addressRPC := rpc.NewAddressRPC(ethClient, cfg.Rpc.TimeoutSeconds)
+	addressService := service.NewAddressService(addressRPC)
+	addressController := controller.NewAddressController(addressService)
+
 	router := api.NewRouter(
 		txController,
 		blockController,
+		addressController,
 	)
 
 	addr := ":" + cfg.Server.Port

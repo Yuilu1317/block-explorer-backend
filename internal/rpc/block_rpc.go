@@ -4,26 +4,23 @@ import (
 	"context"
 	"fmt"
 	"math/big"
-	"time"
 
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 )
 
 type BlockRPC struct {
-	client         *ethclient.Client
-	timeoutSeconds int
+	BaseRPC
 }
 
 func NewBlockRPC(client *ethclient.Client, timeoutSeconds int) *BlockRPC {
 	return &BlockRPC{
-		client:         client,
-		timeoutSeconds: timeoutSeconds,
+		BaseRPC: NewBaseRPC(client, timeoutSeconds),
 	}
 }
 
 func (r *BlockRPC) GetBlockByNumber(ctx context.Context, number uint64) (*ethtypes.Block, error) {
-	ctx, cancel := context.WithTimeout(ctx, time.Duration(r.timeoutSeconds)*time.Second)
+	ctx, cancel := r.withTimeout(ctx)
 	defer cancel()
 
 	blockNumber := new(big.Int).SetUint64(number)

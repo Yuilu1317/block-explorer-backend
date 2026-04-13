@@ -23,3 +23,10 @@ type BlockDetailDTO struct {
 	GasUsed    uint64 `json:"gas_used"`
 	GasLimit   uint64 `json:"gas_limit"`
 }
+
+type AddressInfo struct {
+	Address    string `json:"address"`
+	Balance    string `json:"balance"`
+	Nonce      uint64 `json:"nonce"`
+	IsContract bool   `json:"is_contract"`
+}

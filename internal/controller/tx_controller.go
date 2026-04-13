@@ -1,11 +1,8 @@
 package controller
 
 import (
-	"context"
-	"errors"
-	"net/http"
-
 	"block-explorer-backend/internal/types"
+	"context"
 
 	"github.com/gin-gonic/gin"
 )
@@ -39,37 +36,20 @@ func (ctl *TxController) GetTx(c *gin.Context) {
 
 	// Extract the transaction hash from URL path parameter (e.g. /tx/:hash)
 	hash := c.Param("hash")
+	if hash == "" {
+		types.WriteBadRequest(c, "transaction hash is required")
+		return
+	}
 
 	// Delegate the business logic to the service layer
 	tx, err := ctl.txService.GetTxByHash(ctx, hash)
 	// Handle errors and map them to appropriate HTTP status codes
 
 	if err != nil {
-		statusCode := http.StatusInternalServerError
-		message := "internal server error"
-
-		switch {
-		// Invalid input (e.g. malformed hash) → 400 Bad Request
-		case errors.Is(err, types.ErrInvalidTxHash):
-			statusCode = http.StatusBadRequest
-			message = "invalid tx hash"
-		case errors.Is(err, types.ErrTxNotFound):
-			statusCode = http.StatusNotFound
-			message = "transaction not found"
-		}
-
-		// Return standardized error response
-		c.JSON(statusCode, types.ErrorResponse{
-			Code:    statusCode,
-			Message: message,
-		})
+		types.WriteError(c, err)
 		return
 	}
 
 	// Return successful response with transaction data
-	c.JSON(http.StatusOK, types.SuccessResponse[*types.TxDetailDTO]{
-		Code:    0,
-		Message: "success",
-		Data:    tx,
-	})
+	types.WriteSuccess(c, tx)
 }
