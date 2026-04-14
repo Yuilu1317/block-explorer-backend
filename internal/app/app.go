@@ -1,7 +1,10 @@
 package app
 
 import (
+	"block-explorer-backend/internal/db"
+	"block-explorer-backend/internal/db/models"
 	"fmt"
+	"log"
 
 	"block-explorer-backend/api"
 	"block-explorer-backend/internal/config"
@@ -14,6 +17,20 @@ func Run() error {
 	cfg, err := config.Load("configs/config.yaml")
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
+	}
+
+	database, err := db.NewDB(cfg)
+	if err != nil {
+		return err
+	}
+	if err := database.AutoMigrate(&models.Block{}); err != nil {
+		return fmt.Errorf("auto migrate block table failed: %w", err)
+	}
+	log.Println("database migrated")
+
+	sqlDB, err := database.DB()
+	if err != nil {
+		return fmt.Errorf("get db: %w", err)
 	}
 
 	ethClient, err := rpc.NewEthClient(cfg.Rpc.RPCURL)
@@ -33,10 +50,13 @@ func Run() error {
 	addressService := service.NewAddressService(addressRPC)
 	addressController := controller.NewAddressController(addressService)
 
+	debugController := controller.NewDebugController(sqlDB)
+
 	router := api.NewRouter(
 		txController,
 		blockController,
 		addressController,
+		debugController,
 	)
 
 	addr := ":" + cfg.Server.Port

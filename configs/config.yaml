@@ -4,3 +4,6 @@ server:
 rpc:
   rpc_url: "https://ethereum-rpc.publicnode.com"
   timeout_seconds: 10
+
+db:
+  dsn: "host=127.0.0.1 user=postgres password=951117 dbname=block_explorer port=5432 sslmode=disable TimeZone=Asia/Shanghai"

@@ -10,6 +10,7 @@ import (
 type Config struct {
 	Server ServerConfig `yaml:"server"`
 	Rpc    RpcConfig    `yaml:"rpc"`
+	DB     DBConfig     `yaml:"db"`
 }
 
 type ServerConfig struct {
@@ -19,6 +20,10 @@ type ServerConfig struct {
 type RpcConfig struct {
 	RPCURL         string `yaml:"rpc_url"`
 	TimeoutSeconds int    `yaml:"timeout_seconds"`
+}
+
+type DBConfig struct {
+	DSN string `yaml:"dsn"`
 }
 
 func Load(path string) (*Config, error) {
@@ -40,6 +45,10 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.Rpc.TimeoutSeconds <= 0 {
 		cfg.Rpc.TimeoutSeconds = 10
+	}
+
+	if cfg.DB.DSN == "" {
+		return nil, fmt.Errorf("db.dsn is required")
 	}
 
 	return &cfg, nil

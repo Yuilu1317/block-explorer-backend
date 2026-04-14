@@ -10,6 +10,7 @@ func NewRouter(
 	txController *controller.TxController,
 	blockController *controller.BlockController,
 	addressController *controller.AddressController,
+	debugController *controller.DebugController,
 ) *gin.Engine {
 	r := gin.Default()
 
@@ -18,6 +19,8 @@ func NewRouter(
 			"message": "ok",
 		})
 	})
+
+	r.GET("/debug/db-stats", debugController.DBStats)
 
 	txGroup := r.Group("/tx")
 	{
