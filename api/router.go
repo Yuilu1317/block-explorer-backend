@@ -20,7 +20,10 @@ func NewRouter(
 		})
 	})
 
-	r.GET("/debug/db-stats", debugController.DBStats)
+	debugGroup := r.Group("/debug")
+	{
+		debugGroup.GET("/db-stats", debugController.DBStats)
+	}
 
 	txGroup := r.Group("/tx")
 	{
@@ -30,7 +33,10 @@ func NewRouter(
 	blockGroup := r.Group("/block")
 	{
 		blockGroup.GET("/:number", blockController.GetBlock)
+		blockGroup.POST("/sync/:number", blockController.SyncBlock)
 	}
+
+	r.POST("/blocks/sync", blockController.SyncBlockRange)
 
 	addressGroup := r.Group("/address")
 	{

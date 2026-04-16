@@ -10,8 +10,8 @@ type Block struct {
 	Timestamp  uint64 `gorm:"not null"`
 	Miner      string `gorm:"size:42"`
 	TxCount    int    `gorm:"not null"`
-	GasUsed    string `gorm:"type:varchar(50)"`
-	GasLimit   string `gorm:"type:varchar(50)"`
+	GasUsed    uint64 `gorm:"not null"`
+	GasLimit   uint64 `gorm:"not null"`
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
 }

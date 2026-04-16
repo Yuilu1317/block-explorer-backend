@@ -3,6 +3,7 @@ package app
 import (
 	"block-explorer-backend/internal/db"
 	"block-explorer-backend/internal/db/models"
+	"block-explorer-backend/internal/db/repo"
 	"fmt"
 	"log"
 
@@ -43,7 +44,8 @@ func Run() error {
 	txController := controller.NewTxController(txService)
 
 	blockRPC := rpc.NewBlockRPC(ethClient, cfg.Rpc.TimeoutSeconds)
-	blockService := service.NewBlockService(blockRPC)
+	blockRepo := repo.NewBlockRepository(database)
+	blockService := service.NewBlockService(blockRPC, blockRepo)
 	blockController := controller.NewBlockController(blockService)
 
 	addressRPC := rpc.NewAddressRPC(ethClient, cfg.Rpc.TimeoutSeconds)

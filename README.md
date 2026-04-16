@@ -113,3 +113,21 @@ go test ./...
 
 * Go backend learner transitioning into blockchain
 * Focus on building real-world backend systems
+
+---
+
+## Database
+
+This project uses PostgreSQL as the primary database.
+
+### Setup
+
+1. Install PostgreSQL
+2. Create database:
+
+   CREATE DATABASE block_explorer;
+
+3. Configure `configs/config.yaml`
+4. Run:
+
+   go run ./cmd/server

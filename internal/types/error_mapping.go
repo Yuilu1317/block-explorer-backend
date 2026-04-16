@@ -16,10 +16,22 @@ func MapError(err error) (int, ErrorResponse) {
 			Message: "invalid transaction hash",
 		}
 
+	case errors.Is(err, ErrTxNotFound):
+		return http.StatusNotFound, ErrorResponse{
+			Code:    http.StatusNotFound,
+			Message: "transaction not found",
+		}
+
 	case errors.Is(err, ErrInvalidBlockNumber):
 		return http.StatusBadRequest, ErrorResponse{
 			Code:    http.StatusBadRequest,
 			Message: "invalid block number",
+		}
+
+	case errors.Is(err, ErrBlockNotFound):
+		return http.StatusNotFound, ErrorResponse{
+			Code:    http.StatusNotFound,
+			Message: "block not found",
 		}
 
 	case errors.Is(err, ErrInvalidAddress):
@@ -28,16 +40,16 @@ func MapError(err error) (int, ErrorResponse) {
 			Message: "invalid address",
 		}
 
-	case errors.Is(err, ErrTxNotFound):
-		return http.StatusNotFound, ErrorResponse{
-			Code:    http.StatusNotFound,
-			Message: "transaction not found",
+	case errors.Is(err, ErrInvalidBlockRange):
+		return http.StatusBadRequest, ErrorResponse{
+			Code:    http.StatusBadRequest,
+			Message: "invalid block range",
 		}
 
-	case errors.Is(err, ErrBlockNotFound):
-		return http.StatusNotFound, ErrorResponse{
-			Code:    http.StatusNotFound,
-			Message: "block not found",
+	case errors.Is(err, ErrBlockRangeTooLarge):
+		return http.StatusBadRequest, ErrorResponse{
+			Code:    http.StatusBadRequest,
+			Message: "block range too large",
 		}
 
 	case errors.Is(err, ErrRPCTimeout):

@@ -11,5 +11,8 @@ var (
 
 	ErrInvalidAddress = errors.New("invalid address")
 
+	ErrInvalidBlockRange  = errors.New("invalid block range")
+	ErrBlockRangeTooLarge = errors.New("block range too large")
+
 	ErrRPCTimeout = errors.New("rpc timeout")
 )
