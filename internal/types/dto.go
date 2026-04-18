@@ -30,3 +30,10 @@ type AddressInfo struct {
 	Nonce      uint64 `json:"nonce"`
 	IsContract bool   `json:"is_contract"`
 }
+
+type IndexerStatus struct {
+	DBLatest   *uint64 `json:"db_latest"`
+	RPCLatest  uint64  `json:"rpc_latest"`
+	Next       uint64  `json:"next_to_sync"`
+	ShouldSync bool    `json:"should_sync"`
+}

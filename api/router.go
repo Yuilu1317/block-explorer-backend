@@ -11,6 +11,7 @@ func NewRouter(
 	blockController *controller.BlockController,
 	addressController *controller.AddressController,
 	debugController *controller.DebugController,
+	indexerController *controller.IndexerController,
 ) *gin.Engine {
 	r := gin.Default()
 
@@ -24,6 +25,8 @@ func NewRouter(
 	{
 		debugGroup.GET("/db-stats", debugController.DBStats)
 	}
+
+	r.GET("/indexer/status", indexerController.GetStatus)
 
 	txGroup := r.Group("/tx")
 	{

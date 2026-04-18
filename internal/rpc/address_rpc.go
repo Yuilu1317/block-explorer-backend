@@ -6,15 +6,16 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/ethereum/go-ethereum/rpc"
 )
 
 type AddressRPC struct {
-	BaseRPC
+	*BaseRPC
 }
 
-func NewAddressRPC(client *ethclient.Client, timeoutSeconds int) *AddressRPC {
+func NewAddressRPC(client *ethclient.Client, rpcClient *rpc.Client, timeoutSeconds int) *AddressRPC {
 	return &AddressRPC{
-		BaseRPC: NewBaseRPC(client, timeoutSeconds),
+		BaseRPC: NewBaseRPC(client, rpcClient, timeoutSeconds),
 	}
 }
 

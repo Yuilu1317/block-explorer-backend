@@ -34,31 +34,34 @@ func Run() error {
 		return fmt.Errorf("get db: %w", err)
 	}
 
-	ethClient, err := rpc.NewEthClient(cfg.Rpc.RPCURL)
+	ethClient, rpcClient, err := rpc.NewEthClient(cfg.Rpc.RPCURL)
 	if err != nil {
 		return fmt.Errorf("new eth client: %w", err)
 	}
 
-	txRPC := rpc.NewTxRPC(ethClient, cfg.Rpc.TimeoutSeconds)
+	txRPC := rpc.NewTxRPC(ethClient, rpcClient, cfg.Rpc.TimeoutSeconds)
 	txService := service.NewTxService(txRPC)
 	txController := controller.NewTxController(txService)
 
-	blockRPC := rpc.NewBlockRPC(ethClient, cfg.Rpc.TimeoutSeconds)
+	blockRPC := rpc.NewBlockRPC(ethClient, rpcClient, cfg.Rpc.TimeoutSeconds)
 	blockRepo := repo.NewBlockRepository(database)
 	blockService := service.NewBlockService(blockRPC, blockRepo)
 	blockController := controller.NewBlockController(blockService)
 
-	addressRPC := rpc.NewAddressRPC(ethClient, cfg.Rpc.TimeoutSeconds)
+	addressRPC := rpc.NewAddressRPC(ethClient, rpcClient, cfg.Rpc.TimeoutSeconds)
 	addressService := service.NewAddressService(addressRPC)
 	addressController := controller.NewAddressController(addressService)
 
 	debugController := controller.NewDebugController(sqlDB)
+
+	indexerController := controller.NewIndexerController(blockService)
 
 	router := api.NewRouter(
 		txController,
 		blockController,
 		addressController,
 		debugController,
+		indexerController,
 	)
 
 	addr := ":" + cfg.Server.Port

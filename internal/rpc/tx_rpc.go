@@ -10,17 +10,18 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	gethtypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/ethereum/go-ethereum/rpc"
 )
 
 // TxRPC provides transaction-related Ethereum RPC operations.
 type TxRPC struct {
-	BaseRPC
+	*BaseRPC
 }
 
 // NewTxRPC creates a transaction RPC helper with the configured timeout.
-func NewTxRPC(client *ethclient.Client, timeoutSeconds int) *TxRPC {
+func NewTxRPC(client *ethclient.Client, rpcClient *rpc.Client, timeoutSeconds int) *TxRPC {
 	return &TxRPC{
-		BaseRPC: NewBaseRPC(client, timeoutSeconds),
+		BaseRPC: NewBaseRPC(client, rpcClient, timeoutSeconds),
 	}
 }
 
