@@ -26,7 +26,11 @@ func NewRouter(
 		debugGroup.GET("/db-stats", debugController.DBStats)
 	}
 
-	r.GET("/indexer/status", indexerController.GetStatus)
+	indexerGroup := r.Group("/indexer")
+	{
+		indexerGroup.GET("/status", indexerController.GetSyncStatus)
+		indexerGroup.POST("/run-once", indexerController.RunOnce)
+	}
 
 	txGroup := r.Group("/tx")
 	{

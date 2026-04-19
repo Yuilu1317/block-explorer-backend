@@ -12,7 +12,6 @@ type BlockService interface {
 	GetBlockByNumber(ctx context.Context, number uint64) (*types.BlockDetailDTO, error)
 	SyncBlockToDB(ctx context.Context, number uint64) error
 	SyncBlockRangeToDB(ctx context.Context, start, end uint64) (*types.BlockRangeSyncResult, error)
-	GetNextBlockToSync(ctx context.Context) (*types.IndexerStatus, error)
 }
 
 type BlockController struct {

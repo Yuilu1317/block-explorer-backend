@@ -14,13 +14,11 @@ import (
 
 type BlockRPC interface {
 	GetBlockByNumber(ctx context.Context, number uint64) (*ethtypes.Block, error)
-	GetLatestBlockNumber(ctx context.Context) (uint64, error)
 }
 
 // BlockRepository call interface
 type BlockRepository interface {
 	InsertBlock(ctx context.Context, block *models.Block) error
-	GetLatestBlockNumber(ctx context.Context) (uint64, bool, error)
 }
 
 type BlockService struct {
@@ -130,35 +128,4 @@ func (s *BlockService) SyncBlockRangeToDB(ctx context.Context, start, end uint64
 		result.Succeeded++
 	}
 	return result, nil
-}
-
-func (s *BlockService) GetNextBlockToSync(ctx context.Context) (*types.IndexerStatus, error) {
-	dbLatest, exists, err := s.blockRepo.GetLatestBlockNumber(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	rpcLatest, err := s.blockRPC.GetLatestBlockNumber(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	var (
-		next  uint64
-		dbPtr *uint64
-	)
-
-	if exists {
-		dbPtr = &dbLatest
-		next = dbLatest + 1
-	} else {
-		next = 0
-	}
-
-	return &types.IndexerStatus{
-		DBLatest:   dbPtr,
-		RPCLatest:  rpcLatest,
-		Next:       next,
-		ShouldSync: next <= rpcLatest,
-	}, nil
 }

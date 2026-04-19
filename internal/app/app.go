@@ -4,6 +4,7 @@ import (
 	"block-explorer-backend/internal/db"
 	"block-explorer-backend/internal/db/models"
 	"block-explorer-backend/internal/db/repo"
+	"block-explorer-backend/internal/indexer"
 	"fmt"
 	"log"
 
@@ -54,7 +55,8 @@ func Run() error {
 
 	debugController := controller.NewDebugController(sqlDB)
 
-	indexerController := controller.NewIndexerController(blockService)
+	blockIndexer := indexer.NewBlockIndexer(blockRPC, blockRepo, blockService)
+	indexerController := controller.NewIndexerController(blockIndexer)
 
 	router := api.NewRouter(
 		txController,

@@ -2,25 +2,42 @@ package controller
 
 import (
 	"block-explorer-backend/internal/types"
+	"context"
 
 	"github.com/gin-gonic/gin"
 )
 
+type Indexer interface {
+	GetNextBlockToSync(ctx context.Context) (*types.IndexerStatus, error)
+	RunIndexerOnce(ctx context.Context) (*types.IndexerOnceResult, error)
+}
+
 type IndexerController struct {
-	blockService BlockService
+	indexer Indexer
 }
 
-func NewIndexerController(blockService BlockService) *IndexerController {
-	return &IndexerController{blockService: blockService}
+func NewIndexerController(indexer Indexer) *IndexerController {
+	return &IndexerController{indexer: indexer}
 }
 
-func (ctl *IndexerController) GetStatus(c *gin.Context) {
+func (ctl *IndexerController) GetSyncStatus(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	status, err := ctl.blockService.GetNextBlockToSync(ctx)
+	status, err := ctl.indexer.GetNextBlockToSync(ctx)
 	if err != nil {
 		types.WriteError(c, err)
 		return
 	}
 	types.WriteSuccess(c, status)
+}
+
+func (ctl *IndexerController) RunOnce(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	onceResult, err := ctl.indexer.RunIndexerOnce(ctx)
+	if err != nil {
+		types.WriteError(c, err)
+		return
+	}
+	types.WriteSuccess(c, onceResult)
 }
