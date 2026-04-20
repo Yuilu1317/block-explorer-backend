@@ -13,6 +13,10 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 )
 
@@ -66,7 +70,7 @@ func Run() error {
 		debugController,
 		indexerController,
 	)
-	
+
 	rootCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -74,5 +78,34 @@ func Run() error {
 	go runner.Start(rootCtx)
 
 	addr := ":" + cfg.Server.Port
-	return router.Run(addr)
+
+	srv := &http.Server{
+		Addr:    addr,
+		Handler: router,
+	}
+
+	go func() {
+		log.Printf("http server listening on %s", addr)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("http server error: %v", err)
+		}
+	}()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
+
+	<-quit
+	log.Println("shutdown signal received")
+
+	cancel()
+
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer shutdownCancel()
+
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		return fmt.Errorf("shutdown http server: %w", err)
+	}
+
+	log.Println("server exited")
+	return nil
 }

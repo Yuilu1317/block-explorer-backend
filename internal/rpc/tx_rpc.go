@@ -4,6 +4,7 @@ import (
 	"block-explorer-backend/internal/types"
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
@@ -33,7 +34,7 @@ func (r *TxRPC) GetTransactionByHash(ctx context.Context, hash string) (*types.T
 
 	tx, isPending, err := r.client.TransactionByHash(ctx, txHash)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("rpc: get transaction by hash %s: %w", hash, err)
 	}
 	if tx == nil {
 		return nil, ethereum.NotFound
@@ -41,13 +42,13 @@ func (r *TxRPC) GetTransactionByHash(ctx context.Context, hash string) (*types.T
 
 	chainID, err := r.client.ChainID(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("rpc: get chain id: %w", err)
 	}
 
 	signer := gethtypes.LatestSignerForChainID(chainID)
 	from, err := signer.Sender(tx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("rpc: derive sender from tx %s: %w", hash, err)
 	}
 
 	var receipt *gethtypes.Receipt
@@ -55,7 +56,7 @@ func (r *TxRPC) GetTransactionByHash(ctx context.Context, hash string) (*types.T
 		receipt, err = r.client.TransactionReceipt(ctx, txHash)
 		if err != nil {
 			if !errors.Is(err, ethereum.NotFound) {
-				return nil, err
+				return nil, fmt.Errorf("rpc: get receipt for tx %s: %w", hash, err)
 			}
 		}
 	}

@@ -2,6 +2,7 @@ package rpc
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
@@ -26,7 +27,7 @@ func (r *AddressRPC) GetBalance(ctx context.Context, address string) (string, er
 
 	balance, err := r.client.BalanceAt(ctx, addr, nil)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("rpc: get balance for %s: %w", address, err)
 	}
 	return balance.String(), nil
 }
@@ -39,7 +40,7 @@ func (r *AddressRPC) GetNonce(ctx context.Context, address string) (uint64, erro
 
 	nonce, err := r.client.NonceAt(ctx, addr, nil)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("rpc: get nonce for %s: %w", address, err)
 	}
 	return nonce, nil
 }
@@ -51,7 +52,7 @@ func (r *AddressRPC) GetCode(ctx context.Context, address string) (string, error
 
 	code, err := r.client.CodeAt(ctx, addr, nil)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("rpc: get code for %s: %w", address, err)
 	}
 	return hexutil.Encode(code), nil
 }

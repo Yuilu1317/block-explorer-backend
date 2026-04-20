@@ -2,6 +2,7 @@ package rpc
 
 import (
 	"context"
+	"fmt"
 	"math/big"
 
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
@@ -27,7 +28,7 @@ func (r *BlockRPC) GetBlockByNumber(ctx context.Context, number uint64) (*ethtyp
 
 	block, err := r.client.BlockByNumber(ctx, blockNumber)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get block by number %d: %w", number, err)
 	}
 
 	return block, nil
@@ -39,7 +40,7 @@ func (r *BlockRPC) GetLatestBlockNumber(ctx context.Context) (uint64, error) {
 
 	number, err := r.client.BlockNumber(ctx)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("get latest block number: %w", err)
 	}
 	return number, nil
 }
