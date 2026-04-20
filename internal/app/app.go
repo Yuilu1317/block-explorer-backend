@@ -1,18 +1,19 @@
 package app
 
 import (
+	"block-explorer-backend/api"
+	"block-explorer-backend/internal/config"
+	"block-explorer-backend/internal/controller"
 	"block-explorer-backend/internal/db"
 	"block-explorer-backend/internal/db/models"
 	"block-explorer-backend/internal/db/repo"
 	"block-explorer-backend/internal/indexer"
-	"fmt"
-	"log"
-
-	"block-explorer-backend/api"
-	"block-explorer-backend/internal/config"
-	"block-explorer-backend/internal/controller"
 	"block-explorer-backend/internal/rpc"
 	"block-explorer-backend/internal/service"
+	"context"
+	"fmt"
+	"log"
+	"time"
 )
 
 func Run() error {
@@ -65,6 +66,12 @@ func Run() error {
 		debugController,
 		indexerController,
 	)
+	
+	rootCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	runner := indexer.NewRunner(blockIndexer, 2*time.Second, 3*time.Second)
+	go runner.Start(rootCtx)
 
 	addr := ":" + cfg.Server.Port
 	return router.Run(addr)

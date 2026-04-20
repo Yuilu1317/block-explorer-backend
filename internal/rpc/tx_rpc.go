@@ -4,7 +4,6 @@ import (
 	"block-explorer-backend/internal/types"
 	"context"
 	"errors"
-	"fmt"
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
@@ -42,13 +41,13 @@ func (r *TxRPC) GetTransactionByHash(ctx context.Context, hash string) (*types.T
 
 	chainID, err := r.client.ChainID(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("fetch network id: %w", err)
+		return nil, err
 	}
 
 	signer := gethtypes.LatestSignerForChainID(chainID)
 	from, err := signer.Sender(tx)
 	if err != nil {
-		return nil, fmt.Errorf("derive sender from tx: %w", err)
+		return nil, err
 	}
 
 	var receipt *gethtypes.Receipt
@@ -56,7 +55,7 @@ func (r *TxRPC) GetTransactionByHash(ctx context.Context, hash string) (*types.T
 		receipt, err = r.client.TransactionReceipt(ctx, txHash)
 		if err != nil {
 			if !errors.Is(err, ethereum.NotFound) {
-				return nil, fmt.Errorf("fetch receipt: %w", err)
+				return nil, err
 			}
 		}
 	}
