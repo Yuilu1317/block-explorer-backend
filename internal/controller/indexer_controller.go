@@ -3,6 +3,7 @@ package controller
 import (
 	"block-explorer-backend/internal/types"
 	"context"
+	"log"
 
 	"github.com/gin-gonic/gin"
 )
@@ -25,6 +26,7 @@ func (ctl *IndexerController) GetSyncStatus(c *gin.Context) {
 
 	status, err := ctl.indexer.GetNextBlockToSync(ctx)
 	if err != nil {
+		log.Printf("[indexer-status] error: %v\n", err)
 		types.WriteError(c, err)
 		return
 	}

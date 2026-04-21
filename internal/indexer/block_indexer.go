@@ -2,7 +2,9 @@ package indexer
 
 import (
 	"block-explorer-backend/internal/types"
+	"block-explorer-backend/internal/utils"
 	"context"
+	"fmt"
 )
 
 type BlockRPC interface {
@@ -34,12 +36,18 @@ func NewBlockIndexer(blockRPC BlockRPC, blockRepo BlockRepository, blockService 
 func (s *BlockIndexer) GetNextBlockToSync(ctx context.Context) (*types.IndexerStatus, error) {
 	dbLatest, exists, err := s.blockRepo.GetLatestBlockNumber(ctx)
 	if err != nil {
-		return nil, err
+		if utils.IsTimeoutOrCanceled(err) {
+			return nil, fmt.Errorf("db latest block timeout: %w", err)
+		}
+		return nil, fmt.Errorf("db latest block: %w", err)
 	}
 
 	rpcLatest, err := s.blockRPC.GetLatestBlockNumber(ctx)
 	if err != nil {
-		return nil, err
+		if utils.IsTimeoutOrCanceled(err) {
+			return nil, fmt.Errorf("rpc latest block timeout: %w", err)
+		}
+		return nil, fmt.Errorf("rpc latest block: %w", err)
 	}
 
 	var (
@@ -65,7 +73,7 @@ func (s *BlockIndexer) GetNextBlockToSync(ctx context.Context) (*types.IndexerSt
 func (s *BlockIndexer) RunIndexerOnce(ctx context.Context) (*types.IndexerOnceResult, error) {
 	status, err := s.GetNextBlockToSync(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("run indexer once: get sync status: %w", err)
 	}
 
 	result := &types.IndexerOnceResult{
@@ -79,7 +87,10 @@ func (s *BlockIndexer) RunIndexerOnce(ctx context.Context) (*types.IndexerOnceRe
 	}
 
 	if err := s.blockService.SyncBlockToDB(ctx, status.Next); err != nil {
-		return nil, err
+		if utils.IsTimeoutOrCanceled(err) {
+			return nil, fmt.Errorf("run indexer once: sync block %d timeout: %w", status.Next, err)
+		}
+		return nil, fmt.Errorf("run indexer once: sync block %d: %w", status.Next, err)
 	}
 
 	syncedBlock := status.Next

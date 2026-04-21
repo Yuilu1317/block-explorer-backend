@@ -27,12 +27,12 @@ func NewRunner(indexer LoopIndexer, interval time.Duration, runTimeout time.Dura
 }
 
 func (r *Runner) Start(ctx context.Context) {
-	log.Println("[indexer] started")
+	log.Println("[indexer-runner] started")
 
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("[indexer] stopped")
+			log.Println("[indexer-runner] stopped")
 			return
 		default:
 		}
@@ -42,14 +42,14 @@ func (r *Runner) Start(ctx context.Context) {
 		cancel()
 
 		if err != nil {
-			log.Printf("[indexer] error: %v\n", err)
+			log.Printf("[indexer-runner] error: %v\n", err)
 		} else {
 			dbLatest := "null"
 			if result.DBLatest != nil {
 				dbLatest = fmt.Sprintf("%d", *result.DBLatest)
 			}
 			log.Printf(
-				"[indexer] db=%s rpc=%d next=%d synced=%v\n",
+				"[indexer-runner] db=%s rpc=%d next=%d synced=%v\n",
 				dbLatest,
 				result.RPCLatest,
 				result.NextToSync,
@@ -59,7 +59,7 @@ func (r *Runner) Start(ctx context.Context) {
 
 		select {
 		case <-ctx.Done():
-			log.Println("[indexer] stopped")
+			log.Println("[indexer-runner] stopped")
 			return
 		case <-time.After(r.interval):
 		}
