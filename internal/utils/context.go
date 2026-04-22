@@ -5,6 +5,10 @@ import (
 	"errors"
 )
 
-func IsTimeoutOrCanceled(err error) bool {
-	return errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)
+func IsTimeout(err error) bool {
+	return errors.Is(err, context.DeadlineExceeded)
+}
+
+func IsCanceled(err error) bool {
+	return errors.Is(err, context.Canceled)
 }

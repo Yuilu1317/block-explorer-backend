@@ -2,15 +2,12 @@ package service
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math/big"
 	"strings"
 
 	"block-explorer-backend/internal/types"
 	"block-explorer-backend/internal/utils"
-
-	"github.com/ethereum/go-ethereum"
 )
 
 type TxRPC interface {
@@ -37,10 +34,7 @@ func (s *TxService) GetTxByHash(ctx context.Context, hash string) (*types.TxDeta
 
 	raw, err := s.txRPC.GetTransactionByHash(ctx, hash)
 	if err != nil {
-		if errors.Is(err, ethereum.NotFound) {
-			return nil, types.ErrTxNotFound
-		}
-		return nil, mapRPCError(err)
+		return nil, fmt.Errorf("get transaction by hash %s: %w", hash, err)
 	}
 
 	return s.toTxDetailDTO(raw), nil

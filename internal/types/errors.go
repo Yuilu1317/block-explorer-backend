@@ -15,4 +15,7 @@ var (
 	ErrBlockRangeTooLarge = errors.New("block range too large")
 
 	ErrRPCTimeout = errors.New("rpc timeout")
+	ErrDBTimeout  = errors.New("db timeout")
+
+	ErrRequestCanceled = errors.New("request canceled")
 )

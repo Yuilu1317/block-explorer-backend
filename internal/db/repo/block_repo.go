@@ -2,8 +2,10 @@ package repo
 
 import (
 	"block-explorer-backend/internal/db/models"
+	"block-explorer-backend/internal/types"
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"gorm.io/gorm"
@@ -20,7 +22,11 @@ func NewBlockRepository(db *gorm.DB) *BlockRepository {
 
 func (r *BlockRepository) InsertBlock(ctx context.Context, block *models.Block) error {
 	if err := r.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(block).Error; err != nil {
-		return fmt.Errorf("insert block failed: %w", err)
+		mapped := mapDBError(err)
+		if mapped != err {
+			return mapped
+		}
+		return fmt.Errorf("insert block: %w", err)
 	}
 	return nil
 }
@@ -30,7 +36,11 @@ func (r *BlockRepository) GetLatestBlockNumber(ctx context.Context) (uint64, boo
 
 	err := r.db.WithContext(ctx).Model(&models.Block{}).Select("MAX(number)").Scan(&number).Error
 	if err != nil {
-		return 0, false, err
+		mapped := mapDBError(err)
+		if mapped != err {
+			return 0, false, mapped
+		}
+		return 0, false, fmt.Errorf("query latest block number: %w", err)
 	}
 
 	if !number.Valid {
@@ -38,4 +48,22 @@ func (r *BlockRepository) GetLatestBlockNumber(ctx context.Context) (uint64, boo
 	}
 
 	return uint64(number.Int64), true, nil
+}
+
+func (r *BlockRepository) GetBlockByNumber(ctx context.Context, number uint64) (*models.Block, error) {
+	var block models.Block
+
+	err := r.db.WithContext(ctx).Where("number = ?", number).Take(&block).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, types.ErrBlockNotFound
+		}
+		mapped := mapDBError(err)
+		if mapped != err {
+			return nil, mapped
+		}
+		return nil, fmt.Errorf("query block by number %d: %w", number, err)
+	}
+
+	return &block, nil
 }

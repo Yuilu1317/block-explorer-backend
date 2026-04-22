@@ -3,6 +3,7 @@ package service
 import (
 	"block-explorer-backend/internal/types"
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -33,17 +34,17 @@ func (s *AddressService) GetAddress(ctx context.Context, address string) (*types
 
 	balance, err := s.addressRPC.GetBalance(ctx, address)
 	if err != nil {
-		return nil, mapRPCError(err)
+		return nil, fmt.Errorf("get balance of address %s: %w", address, err)
 	}
 
 	nonce, err := s.addressRPC.GetNonce(ctx, address)
 	if err != nil {
-		return nil, mapRPCError(err)
+		return nil, fmt.Errorf("get nonce of address %s: %w", address, err)
 	}
 
 	code, err := s.addressRPC.GetCode(ctx, address)
 	if err != nil {
-		return nil, mapRPCError(err)
+		return nil, fmt.Errorf("get code of address %s: %w", address, err)
 	}
 
 	return &types.AddressInfo{

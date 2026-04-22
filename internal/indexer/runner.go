@@ -3,6 +3,7 @@ package indexer
 import (
 	"block-explorer-backend/internal/types"
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"time"
@@ -42,7 +43,14 @@ func (r *Runner) Start(ctx context.Context) {
 		cancel()
 
 		if err != nil {
-			log.Printf("[indexer-runner] error: %v\n", err)
+			switch {
+			case errors.Is(err, types.ErrRequestCanceled):
+				log.Printf("[indexer-runner] warn: canceled: %v\n", err)
+			case errors.Is(err, types.ErrRPCTimeout), errors.Is(err, types.ErrDBTimeout):
+				log.Printf("[indexer-runner] error: timeout: %v\n", err)
+			default:
+				log.Printf("[indexer-runner] error: %v\n", err)
+			}
 		} else {
 			dbLatest := "null"
 			if result.DBLatest != nil {

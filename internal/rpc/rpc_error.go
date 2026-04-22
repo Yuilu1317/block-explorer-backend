@@ -1,16 +1,16 @@
-package service
+package rpc
 
 import (
 	"block-explorer-backend/internal/types"
-	"context"
-	"errors"
+	"block-explorer-backend/internal/utils"
 )
 
 func mapRPCError(err error) error {
 	switch {
-	case errors.Is(err, context.DeadlineExceeded),
-		errors.Is(err, context.Canceled):
+	case utils.IsTimeout(err):
 		return types.ErrRPCTimeout
+	case utils.IsCanceled(err):
+		return types.ErrRequestCanceled
 	default:
 		return err
 	}

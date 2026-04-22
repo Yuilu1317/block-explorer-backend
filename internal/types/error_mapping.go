@@ -52,10 +52,16 @@ func MapError(err error) (int, ErrorResponse) {
 			Message: "block range too large",
 		}
 
-	case errors.Is(err, ErrRPCTimeout):
+	case errors.Is(err, ErrRPCTimeout), errors.Is(err, ErrDBTimeout):
 		return http.StatusGatewayTimeout, ErrorResponse{
 			Code:    http.StatusGatewayTimeout,
-			Message: "rpc timeout",
+			Message: "upstream timeout",
+		}
+
+	case errors.Is(err, ErrRequestCanceled):
+		return http.StatusRequestTimeout, ErrorResponse{
+			Code:    http.StatusRequestTimeout,
+			Message: "request canceled",
 		}
 
 	default:
@@ -68,9 +74,20 @@ func MapError(err error) (int, ErrorResponse) {
 
 func WriteError(c *gin.Context, err error) {
 	statusCode, resp := MapError(err)
-	if statusCode >= http.StatusInternalServerError {
-		log.Printf("error: %v", err)
+	switch {
+	case errors.Is(err, ErrRequestCanceled):
+		log.Printf("[warn] type=request canceled err=%v", err)
+
+	case errors.Is(err, ErrRPCTimeout), errors.Is(err, ErrDBTimeout):
+		log.Printf("[error] type=time err=%v", err)
+
+	case statusCode >= http.StatusInternalServerError:
+		log.Printf("[error] type=internal err=%v", err)
+
+	default:
+		log.Printf("[warn] type=client error err=%v", err)
 	}
+
 	c.JSON(statusCode, resp)
 }
 

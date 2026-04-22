@@ -4,10 +4,8 @@ import (
 	"block-explorer-backend/internal/db/models"
 	"block-explorer-backend/internal/types"
 	"context"
-	"errors"
 	"fmt"
 
-	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 )
@@ -19,6 +17,7 @@ type BlockRPC interface {
 // BlockRepository call interface
 type BlockRepository interface {
 	InsertBlock(ctx context.Context, block *models.Block) error
+	GetBlockByNumber(ctx context.Context, number uint64) (*models.Block, error)
 }
 
 type BlockService struct {
@@ -36,10 +35,7 @@ func NewBlockService(blockRPC BlockRPC, blockRepo BlockRepository) *BlockService
 func (s *BlockService) getRawBlockByNumber(ctx context.Context, number uint64) (*ethtypes.Block, error) {
 	block, err := s.blockRPC.GetBlockByNumber(ctx, number)
 	if err != nil {
-		if errors.Is(err, ethereum.NotFound) {
-			return nil, types.ErrBlockNotFound
-		}
-		return nil, mapRPCError(err)
+		return nil, err
 	}
 	return block, nil
 }
@@ -47,7 +43,7 @@ func (s *BlockService) getRawBlockByNumber(ctx context.Context, number uint64) (
 func (s *BlockService) GetBlockByNumber(ctx context.Context, number uint64) (*types.BlockDetailDTO, error) {
 	block, err := s.getRawBlockByNumber(ctx, number)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get block detail by number %d: %w", number, err)
 	}
 	return toBlockDetailDTO(block), nil
 }
@@ -67,13 +63,13 @@ func toBlockDetailDTO(block *ethtypes.Block) *types.BlockDetailDTO {
 func (s *BlockService) SyncBlockToDB(ctx context.Context, number uint64) error {
 	block, err := s.getRawBlockByNumber(ctx, number)
 	if err != nil {
-		return err
+		return fmt.Errorf("fetch block %d from rpc: %w", number, err)
 	}
 
 	blockModel := toBlockModel(block)
 
 	if err := s.blockRepo.InsertBlock(ctx, blockModel); err != nil {
-		return fmt.Errorf("insert block to db: %w", err)
+		return fmt.Errorf("insert block %d into db: %w", number, err)
 	}
 	return nil
 }
@@ -115,7 +111,7 @@ func (s *BlockService) SyncBlockRangeToDB(ctx context.Context, start, end uint64
 	for number := start; number <= end; number++ {
 		select {
 		case <-ctx.Done():
-			return result, ctx.Err()
+			return result, types.ErrRequestCanceled
 		default:
 		}
 
