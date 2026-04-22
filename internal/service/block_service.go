@@ -33,19 +33,27 @@ func NewBlockService(blockRPC BlockRPC, blockRepo BlockRepository) *BlockService
 }
 
 func (s *BlockService) getRawBlockByNumber(ctx context.Context, number uint64) (*ethtypes.Block, error) {
-	block, err := s.blockRPC.GetBlockByNumber(ctx, number)
+	rpcBlock, err := s.blockRPC.GetBlockByNumber(ctx, number)
 	if err != nil {
 		return nil, err
 	}
-	return block, nil
+	return rpcBlock, nil
 }
 
 func (s *BlockService) GetBlockByNumber(ctx context.Context, number uint64) (*types.BlockDetailDTO, error) {
-	block, err := s.getRawBlockByNumber(ctx, number)
+	dbBlock, err := s.blockRepo.GetBlockByNumber(ctx, number)
+	if err != nil {
+		return nil, fmt.Errorf("get block %d from db: %w", number, err)
+	}
+
+	if dbBlock != nil {
+		return toBlockDetailDTOFromModel(dbBlock), nil
+	}
+	rpcBlock, err := s.getRawBlockByNumber(ctx, number)
 	if err != nil {
 		return nil, fmt.Errorf("get block detail by number %d: %w", number, err)
 	}
-	return toBlockDetailDTO(block), nil
+	return toBlockDetailDTO(rpcBlock), nil
 }
 
 func toBlockDetailDTO(block *ethtypes.Block) *types.BlockDetailDTO {
@@ -57,6 +65,22 @@ func toBlockDetailDTO(block *ethtypes.Block) *types.BlockDetailDTO {
 		TxCount:    len(block.Transactions()),
 		GasUsed:    block.GasUsed(),
 		GasLimit:   block.GasLimit(),
+	}
+}
+
+func toBlockDetailDTOFromModel(block *models.Block) *types.BlockDetailDTO {
+	if block == nil {
+		return nil
+	}
+
+	return &types.BlockDetailDTO{
+		Number:     block.Number,
+		Hash:       block.Hash,
+		ParentHash: block.ParentHash,
+		Timestamp:  block.Timestamp,
+		TxCount:    block.TxCount,
+		GasUsed:    block.GasUsed,
+		GasLimit:   block.GasLimit,
 	}
 }
 
