@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 )
@@ -19,7 +20,7 @@ type BlockRPC interface {
 // BlockRepository call interface
 type BlockRepository interface {
 	InsertBlock(ctx context.Context, block *models.Block) error
-	GetBlockByNumber(ctx context.Context, number uint64) (*models.Block, error)
+	GetBlockByNumber(ctx context.Context, number uint64) (*models.Block, bool, error)
 }
 
 type BlockService struct {
@@ -43,23 +44,21 @@ func (s *BlockService) getRawBlockByNumber(ctx context.Context, number uint64) (
 }
 
 func (s *BlockService) GetBlockByNumber(ctx context.Context, number uint64) (model.BlockQueryResult, error) {
-	// GetBlockByNumber returns:
-	//   - (*models.Block, nil) when found
-	//   - (nil, types.ErrBlockNotFound) when not found
-	//   - (nil, other error) on DB failure
-	dbBlock, err := s.blockRepo.GetBlockByNumber(ctx, number)
-	switch {
-	case err == nil:
-		return mapper.MapBlockEntityToQueryResult(dbBlock), nil
-
-	case errors.Is(err, types.ErrBlockNotFound):
-
-	default:
+	dbBlock, found, err := s.blockRepo.GetBlockByNumber(ctx, number)
+	if err != nil {
+		log.Printf("[error] block query db failed: number=%d err=%v", number, err)
 		return model.BlockQueryResult{}, fmt.Errorf("get block %d from db: %w", number, err)
+	}
+	if found {
+		return mapper.MapBlockEntityToQueryResult(dbBlock), nil
 	}
 
 	rpcBlock, err := s.getRawBlockByNumber(ctx, number)
 	if err != nil {
+		if errors.Is(err, types.ErrBlockNotFound) {
+			return model.BlockQueryResult{}, types.ErrBlockNotFound
+		}
+		log.Printf("[error] block query rpc failed: number=%d err=%v", number, err)
 		return model.BlockQueryResult{}, fmt.Errorf("get block detail by number %d: %w", number, err)
 	}
 	return mapper.MapRPCBlockToQueryResult(rpcBlock), nil

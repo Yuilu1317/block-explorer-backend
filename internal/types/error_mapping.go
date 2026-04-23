@@ -2,7 +2,6 @@ package types
 
 import (
 	"errors"
-	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -74,20 +73,6 @@ func MapError(err error) (int, ErrorResponse) {
 
 func WriteError(c *gin.Context, err error) {
 	statusCode, resp := MapError(err)
-	switch {
-	case errors.Is(err, ErrRequestCanceled):
-		log.Printf("[warn] type=request canceled err=%v", err)
-
-	case errors.Is(err, ErrRPCTimeout), errors.Is(err, ErrDBTimeout):
-		log.Printf("[error] type=time err=%v", err)
-
-	case statusCode >= http.StatusInternalServerError:
-		log.Printf("[error] type=internal err=%v", err)
-
-	default:
-		log.Printf("[warn] type=client error err=%v", err)
-	}
-
 	c.JSON(statusCode, resp)
 }
 

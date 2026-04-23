@@ -2,7 +2,6 @@ package repo
 
 import (
 	"block-explorer-backend/internal/db/models"
-	"block-explorer-backend/internal/types"
 	"context"
 	"database/sql"
 	"errors"
@@ -50,20 +49,20 @@ func (r *BlockRepository) GetLatestBlockNumber(ctx context.Context) (uint64, boo
 	return uint64(number.Int64), true, nil
 }
 
-func (r *BlockRepository) GetBlockByNumber(ctx context.Context, number uint64) (*models.Block, error) {
+func (r *BlockRepository) GetBlockByNumber(ctx context.Context, number uint64) (*models.Block, bool, error) {
 	var block models.Block
 
 	err := r.db.WithContext(ctx).Where("number = ?", number).Take(&block).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, types.ErrBlockNotFound
+			return nil, false, nil
 		}
 		mapped := mapDBError(err)
 		if mapped != err {
-			return nil, mapped
+			return nil, false, mapped
 		}
-		return nil, fmt.Errorf("query block by number %d: %w", number, err)
+		return nil, false, fmt.Errorf("query block by number %d: %w", number, err)
 	}
 
-	return &block, nil
+	return &block, false, nil
 }
