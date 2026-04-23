@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"block-explorer-backend/internal/mapper"
+	"block-explorer-backend/internal/service/model"
 	"block-explorer-backend/internal/types"
 	"context"
 	"strconv"
@@ -9,7 +11,7 @@ import (
 )
 
 type BlockService interface {
-	GetBlockByNumber(ctx context.Context, number uint64) (*types.BlockDetailDTO, error)
+	GetBlockByNumber(ctx context.Context, number uint64) (model.BlockQueryResult, error)
 	SyncBlockToDB(ctx context.Context, number uint64) error
 	SyncBlockRangeToDB(ctx context.Context, start, end uint64) (*types.BlockRangeSyncResult, error)
 }
@@ -46,12 +48,14 @@ func (ctl *BlockController) GetBlock(c *gin.Context) {
 		return
 	}
 
-	block, err := ctl.blockService.GetBlockByNumber(ctx, number)
+	result, err := ctl.blockService.GetBlockByNumber(ctx, number)
 	if err != nil {
 		types.WriteError(c, err)
 		return
 	}
-	types.WriteSuccess(c, block)
+	dto := mapper.MapBlockQueryResultToDTO(result)
+
+	types.WriteSuccess(c, dto)
 }
 
 func (ctl *BlockController) SyncBlock(c *gin.Context) {

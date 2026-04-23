@@ -2,6 +2,7 @@ package repo
 
 import (
 	"block-explorer-backend/internal/db/models"
+	"block-explorer-backend/internal/types"
 	"context"
 	"database/sql"
 	"errors"
@@ -55,7 +56,7 @@ func (r *BlockRepository) GetBlockByNumber(ctx context.Context, number uint64) (
 	err := r.db.WithContext(ctx).Where("number = ?", number).Take(&block).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil
+			return nil, types.ErrBlockNotFound
 		}
 		mapped := mapDBError(err)
 		if mapped != err {

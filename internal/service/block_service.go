@@ -2,11 +2,13 @@ package service
 
 import (
 	"block-explorer-backend/internal/db/models"
+	"block-explorer-backend/internal/mapper"
+	"block-explorer-backend/internal/service/model"
 	"block-explorer-backend/internal/types"
 	"context"
+	"errors"
 	"fmt"
 
-	"github.com/ethereum/go-ethereum/common"
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 )
 
@@ -40,48 +42,27 @@ func (s *BlockService) getRawBlockByNumber(ctx context.Context, number uint64) (
 	return rpcBlock, nil
 }
 
-func (s *BlockService) GetBlockByNumber(ctx context.Context, number uint64) (*types.BlockDetailDTO, error) {
+func (s *BlockService) GetBlockByNumber(ctx context.Context, number uint64) (model.BlockQueryResult, error) {
+	// GetBlockByNumber returns:
+	//   - (*models.Block, nil) when found
+	//   - (nil, types.ErrBlockNotFound) when not found
+	//   - (nil, other error) on DB failure
 	dbBlock, err := s.blockRepo.GetBlockByNumber(ctx, number)
-	if err != nil {
-		return nil, fmt.Errorf("get block %d from db: %w", number, err)
+	switch {
+	case err == nil:
+		return mapper.MapBlockEntityToQueryResult(dbBlock), nil
+
+	case errors.Is(err, types.ErrBlockNotFound):
+
+	default:
+		return model.BlockQueryResult{}, fmt.Errorf("get block %d from db: %w", number, err)
 	}
 
-	if dbBlock != nil {
-		return toBlockDetailDTOFromModel(dbBlock), nil
-	}
 	rpcBlock, err := s.getRawBlockByNumber(ctx, number)
 	if err != nil {
-		return nil, fmt.Errorf("get block detail by number %d: %w", number, err)
+		return model.BlockQueryResult{}, fmt.Errorf("get block detail by number %d: %w", number, err)
 	}
-	return toBlockDetailDTO(rpcBlock), nil
-}
-
-func toBlockDetailDTO(block *ethtypes.Block) *types.BlockDetailDTO {
-	return &types.BlockDetailDTO{
-		Number:     block.NumberU64(),
-		Hash:       block.Hash().Hex(),
-		ParentHash: block.ParentHash().Hex(),
-		Timestamp:  block.Time(),
-		TxCount:    len(block.Transactions()),
-		GasUsed:    block.GasUsed(),
-		GasLimit:   block.GasLimit(),
-	}
-}
-
-func toBlockDetailDTOFromModel(block *models.Block) *types.BlockDetailDTO {
-	if block == nil {
-		return nil
-	}
-
-	return &types.BlockDetailDTO{
-		Number:     block.Number,
-		Hash:       block.Hash,
-		ParentHash: block.ParentHash,
-		Timestamp:  block.Timestamp,
-		TxCount:    block.TxCount,
-		GasUsed:    block.GasUsed,
-		GasLimit:   block.GasLimit,
-	}
+	return mapper.MapRPCBlockToQueryResult(rpcBlock), nil
 }
 
 func (s *BlockService) SyncBlockToDB(ctx context.Context, number uint64) error {
@@ -99,17 +80,13 @@ func (s *BlockService) SyncBlockToDB(ctx context.Context, number uint64) error {
 }
 
 func toBlockModel(block *ethtypes.Block) *models.Block {
-	var miner string
-	if block.Coinbase() != (common.Address{}) {
-		miner = block.Coinbase().Hex()
-	}
 
 	return &models.Block{
 		Number:     block.NumberU64(),
 		Hash:       block.Hash().Hex(),
 		ParentHash: block.ParentHash().Hex(),
 		Timestamp:  block.Time(),
-		Miner:      miner,
+		Miner:      block.Coinbase().Hex(),
 		TxCount:    len(block.Transactions()),
 		GasUsed:    block.GasUsed(),
 		GasLimit:   block.GasLimit(),
