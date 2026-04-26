@@ -92,6 +92,8 @@ func toBlockModel(block *ethtypes.Block) *models.Block {
 	}
 }
 
+// SyncBlockRangetoDB handles manual block sync for debugging or recovery.
+// Not used by automatic indexing logic.
 func (s *BlockService) SyncBlockRangeToDB(ctx context.Context, start, end uint64) (*types.BlockRangeSyncResult, error) {
 	if start > end {
 		return nil, types.ErrInvalidBlockRange

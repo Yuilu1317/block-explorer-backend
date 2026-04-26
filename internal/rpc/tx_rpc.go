@@ -43,9 +43,6 @@ func (r *TxRPC) GetTransactionByHash(ctx context.Context, hash string) (*types.T
 		}
 		return nil, fmt.Errorf("rpc: get transaction by hash %s: %w", hash, err)
 	}
-	if tx == nil {
-		return nil, types.ErrTxNotFound
-	}
 
 	chainID, err := r.client.ChainID(ctx)
 	if err != nil {

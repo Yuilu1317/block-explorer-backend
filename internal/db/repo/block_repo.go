@@ -31,9 +31,9 @@ func (r *BlockRepository) InsertBlock(ctx context.Context, block *models.Block) 
 }
 
 func (r *BlockRepository) GetLatestBlockNumber(ctx context.Context) (uint64, bool, error) {
-	var number sql.NullInt64
+	var latestNumber sql.NullInt64
 
-	err := r.db.WithContext(ctx).Model(&models.Block{}).Select("MAX(number)").Scan(&number).Error
+	err := r.db.WithContext(ctx).Model(&models.Block{}).Select("MAX(number)").Scan(&latestNumber).Error
 	if err != nil {
 		mapped := mapDBError(err)
 		if mapped != err {
@@ -42,11 +42,11 @@ func (r *BlockRepository) GetLatestBlockNumber(ctx context.Context) (uint64, boo
 		return 0, false, fmt.Errorf("query latest block number: %w", err)
 	}
 
-	if !number.Valid {
+	if !latestNumber.Valid {
 		return 0, false, nil
 	}
 
-	return uint64(number.Int64), true, nil
+	return uint64(latestNumber.Int64), true, nil
 }
 
 func (r *BlockRepository) GetBlockByNumber(ctx context.Context, number uint64) (*models.Block, bool, error) {
@@ -64,5 +64,5 @@ func (r *BlockRepository) GetBlockByNumber(ctx context.Context, number uint64) (
 		return nil, false, fmt.Errorf("query block by number %d: %w", number, err)
 	}
 
-	return &block, false, nil
+	return &block, true, nil
 }
