@@ -39,7 +39,7 @@ func (f *fakeRPC) GetBlockByNumber(ctx context.Context, number uint64) (*ethtype
 	if f.err != nil {
 		return nil, f.err
 	}
-	return f.block, f.err
+	return f.block, nil
 }
 
 type fakeBlockRepo struct {

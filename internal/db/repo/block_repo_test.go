@@ -192,7 +192,7 @@ func TestBlockRepository_GetBlockByNumber_NotFound(t *testing.T) {
 	}
 }
 
-func TestBlockRepository_GetBlockByHash_Found(t *testing.T) {
+func TestBlockRepository_GetBlockByNumber_Found(t *testing.T) {
 	db := SetupTestDB(t)
 	r := NewBlockRepository(db)
 	ctx := context.Background()
