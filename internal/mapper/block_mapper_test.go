@@ -132,6 +132,7 @@ func TestMapBlockQueryResultToDTO_MapsHeaderFields(t *testing.T) {
 			GasLimit:   f.gasLimit,
 			GasUsed:    f.gasUsed,
 			TxCount:    f.txCount,
+			Miner:      f.miner.Hex(),
 		},
 	}
 	got := MapBlockQueryResultToDTO(block)
@@ -155,5 +156,8 @@ func TestMapBlockQueryResultToDTO_MapsHeaderFields(t *testing.T) {
 	}
 	if got.TxCount != f.txCount {
 		t.Fatalf("TxCount mismatch: got %d, want %d", got.TxCount, f.txCount)
+	}
+	if got.Miner != f.miner.Hex() {
+		t.Fatalf("Miner mismatch: got %s, want %s", got.Miner, f.miner.Hex())
 	}
 }

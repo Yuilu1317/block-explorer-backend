@@ -49,5 +49,6 @@ func MapBlockQueryResultToDTO(r model.BlockQueryResult) types.BlockDetailDTO {
 		GasLimit:   r.Block.GasLimit,
 		GasUsed:    r.Block.GasUsed,
 		TxCount:    r.Block.TxCount,
+		Miner:      r.Block.Miner,
 	}
 }
