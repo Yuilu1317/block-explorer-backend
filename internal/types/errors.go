@@ -3,12 +3,12 @@ package types
 import "errors"
 
 var (
-	ErrInvalidTxHash = errors.New("invalid transaction hash")
+	ErrInvalidTxHash      = errors.New("invalid transaction hash")
 	ErrInvalidBlockNumber = errors.New("invalid block number")
-	ErrInvalidAddress = errors.New("invalid address")
+	ErrInvalidAddress     = errors.New("invalid address")
 	ErrInvalidBlockRange  = errors.New("invalid block range")
 
-	ErrBlockNotFound      = errors.New("block not found")
+	ErrBlockNotFound = errors.New("block not found")
 	ErrTxNotFound    = errors.New("transaction not found")
 
 	ErrBlockRangeTooLarge = errors.New("block range too large")
