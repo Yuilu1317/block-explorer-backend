@@ -1,8 +1,10 @@
 package rpc
 
 import (
+	"block-explorer-backend/internal/types"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -127,5 +129,184 @@ func TestBlockRPC_GetLatestBlockNumber_ReturnsErrorWhenResultIsInvalid(t *testin
 
 	if number != 0 {
 		t.Fatalf("expected block number 0, got %d", number)
+	}
+}
+
+func TestBlockRPC_GetBlockByNumber_Success(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("expected POST, got %s", r.Method)
+		}
+		var req jsonRPCRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.Method != "eth_getBlockByNumber" {
+			t.Fatalf("expected method eth_getBlockByNumber, got %s", req.Method)
+		}
+		if len(req.Params) != 2 {
+			t.Fatalf("expected 2 params, got %d", len(req.Params))
+		}
+		var blockNumber string
+		if err := json.Unmarshal(req.Params[0], &blockNumber); err != nil {
+			t.Fatalf("decode block number param: %v", err)
+		}
+		if blockNumber != "0x1" {
+			t.Fatalf("expected block number param 0x1, got %s", blockNumber)
+		}
+		var fullTx bool
+		if err := json.Unmarshal(req.Params[1], &fullTx); err != nil {
+			t.Fatalf("decode fullTx param: %v", err)
+		}
+
+		if !fullTx {
+			t.Fatalf("expected fullTx true")
+		}
+		zeroHash := "0x" + strings.Repeat("00", 32)
+		oneHash := "0x" + strings.Repeat("11", 32)
+		zeroBloom := "0x" + strings.Repeat("00", 256)
+
+		resp := map[string]any{
+			"jsonrpc": "2.0",
+			"id":      req.ID,
+			"result": map[string]any{
+				"number":           "0x1",
+				"hash":             oneHash,
+				"parentHash":       zeroHash,
+				"nonce":            "0x0000000000000000",
+				"sha3Uncles":       "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+				"logsBloom":        zeroBloom,
+				"transactionsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+				"stateRoot":        zeroHash,
+				"receiptsRoot":     zeroHash,
+				"miner":            "0x0000000000000000000000000000000000000001",
+				"difficulty":       "0x0",
+				"totalDifficulty":  "0x0",
+				"extraData":        "0x",
+				"size":             "0x1",
+				"gasLimit":         "0x1c9c380",
+				"gasUsed":          "0x5208",
+				"timestamp":        "0x65",
+				"transactions":     []any{},
+				"uncles":           []any{},
+				"baseFeePerGas":    "0x1",
+			},
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(resp); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	blockRPC := newTestBlockRPC(t, server.URL)
+
+	block, err := blockRPC.GetBlockByNumber(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("GetBlockByNumber error: %v", err)
+	}
+
+	if block == nil {
+		t.Fatal("expected block, got nil")
+	}
+
+	if block.NumberU64() != 1 {
+		t.Fatalf("expected block number 1, got %d", block.NumberU64())
+	}
+
+	if len(block.Transactions()) != 0 {
+		t.Fatalf("expected 0 transactions, got %d", len(block.Transactions()))
+	}
+}
+
+func TestBlockRPC_GetBlockByNumber_ReturnsErrBlockNotFoundWhenResultIsNull(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("expected POST, got %s", r.Method)
+		}
+		var req jsonRPCRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.Method != "eth_getBlockByNumber" {
+			t.Fatalf("expected method eth_getBlockByNumber, got %s", req.Method)
+		}
+		if len(req.Params) != 2 {
+			t.Fatalf("expected 2 params, got %d", len(req.Params))
+		}
+		var blockNumber string
+		if err := json.Unmarshal(req.Params[0], &blockNumber); err != nil {
+			t.Fatalf("decode block number param: %v", err)
+		}
+
+		if blockNumber != "0x3e7" {
+			t.Fatalf("expected block number param 0x3e7, got %s", blockNumber)
+		}
+		resp := map[string]any{
+			"jsonrpc": "2.0",
+			"id":      req.ID,
+			"result":  nil,
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(resp); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
+	}))
+	t.Cleanup(server.Close)
+	blockRPC := newTestBlockRPC(t, server.URL)
+
+	block, err := blockRPC.GetBlockByNumber(context.Background(), 999)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	if block != nil {
+		t.Fatalf("expected nil block, got %v", block)
+	}
+	if !errors.Is(err, types.ErrBlockNotFound) {
+		t.Fatalf("expected ErrBlockNotFound, got %v", err)
+	}
+}
+
+func TestBlockRPC_GetBlockByNumber_ReturnsErrorWhenRPCReturnsError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("expected POST, got %s", r.Method)
+		}
+		var req jsonRPCRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.Method != "eth_getBlockByNumber" {
+			t.Fatalf("expected method eth_getBlockByNumber, got %s", req.Method)
+		}
+		resp := map[string]any{
+			"jsonrpc": "2.0",
+			"id":      req.ID,
+			"error": map[string]any{
+				"code":    -32602,
+				"message": "invalid argument",
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(resp); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
+	}))
+	t.Cleanup(server.Close)
+	blockRPC := newTestBlockRPC(t, server.URL)
+
+	block, err := blockRPC.GetBlockByNumber(context.Background(), 1)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if block != nil {
+		t.Fatalf("expected nil block, got %v", block)
+	}
+
+	if !strings.Contains(err.Error(), "invalid argument") {
+		t.Fatalf("expected error to contain invalid argument, got %v", err)
 	}
 }
