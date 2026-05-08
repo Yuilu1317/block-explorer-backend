@@ -132,6 +132,54 @@ func TestBlockRPC_GetLatestBlockNumber_ReturnsErrorWhenResultIsInvalid(t *testin
 	}
 }
 
+func TestBlockRPC_GetBlockByNumber_ReturnsErrorWhenHTTPStatusNotOK(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("expected POST, got %s", r.Method)
+		}
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+	}))
+	t.Cleanup(server.Close)
+	blockRPC := newTestBlockRPC(t, server.URL)
+
+	block, err := blockRPC.GetBlockByNumber(context.Background(), 1)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	if block != nil {
+		t.Fatalf("expected nil block, got %v", block)
+	}
+	if errors.Is(err, types.ErrBlockNotFound) {
+		t.Fatalf("expected transport error, got ErrBlockNotFound: %v", err)
+	}
+}
+
+func TestBlockRPC_GetBlockByNumber_ReturnsErrorWhenResponseBodyInvalidJSON(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("expected POST, got %s", r.Method)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`not-json`))
+	}))
+	t.Cleanup(server.Close)
+	blockRPC := newTestBlockRPC(t, server.URL)
+
+	block, err := blockRPC.GetBlockByNumber(context.Background(), 1)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	if block != nil {
+		t.Fatalf("expected nil block, got %v", block)
+	}
+
+	if errors.Is(err, types.ErrBlockNotFound) {
+		t.Fatalf("expected decode error, got ErrBlockNotFound: %v", err)
+	}
+}
+
 func TestBlockRPC_GetBlockByNumber_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
