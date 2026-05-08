@@ -7,11 +7,13 @@ import (
 
 func mapRPCError(err error) error {
 	switch {
+	case err == nil:
+		return nil
 	case utils.IsTimeout(err):
 		return types.ErrRPCTimeout
 	case utils.IsCanceled(err):
 		return types.ErrRequestCanceled
 	default:
-		return err
+		return nil
 	}
 }

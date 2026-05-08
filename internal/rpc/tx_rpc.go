@@ -37,8 +37,7 @@ func (r *TxRPC) GetTransactionByHash(ctx context.Context, hash string) (*types.T
 		if errors.Is(err, ethereum.NotFound) {
 			return nil, types.ErrTxNotFound
 		}
-		mapped := mapRPCError(err)
-		if mapped != err {
+		if mapped := mapRPCError(err); mapped != nil {
 			return nil, mapped
 		}
 		return nil, fmt.Errorf("rpc: get transaction by hash %s: %w", hash, err)
@@ -46,8 +45,7 @@ func (r *TxRPC) GetTransactionByHash(ctx context.Context, hash string) (*types.T
 
 	chainID, err := r.client.ChainID(ctx)
 	if err != nil {
-		mapped := mapRPCError(err)
-		if mapped != err {
+		if mapped := mapRPCError(err); mapped != nil {
 			return nil, mapped
 		}
 		return nil, fmt.Errorf("rpc: get chain id: %w", err)
@@ -63,11 +61,11 @@ func (r *TxRPC) GetTransactionByHash(ctx context.Context, hash string) (*types.T
 	if !isPending {
 		receipt, err = r.client.TransactionReceipt(ctx, txHash)
 		if err != nil {
-			if !errors.Is(err, ethereum.NotFound) {
+			if errors.Is(err, ethereum.NotFound) {
 				receipt = nil
 			} else {
 				mapped := mapRPCError(err)
-				if mapped != err {
+				if mapped != nil {
 					return nil, mapped
 				}
 				return nil, fmt.Errorf("rpc: get receipt for tx %s: %w", hash, err)

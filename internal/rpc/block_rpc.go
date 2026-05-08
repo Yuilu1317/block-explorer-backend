@@ -34,8 +34,7 @@ func (r *BlockRPC) GetBlockByNumber(ctx context.Context, number uint64) (*ethtyp
 		if errors.Is(err, ethereum.NotFound) {
 			return nil, types.ErrBlockNotFound
 		}
-		mapped := mapRPCError(err)
-		if mapped != err {
+		if mapped := mapRPCError(err); mapped != nil {
 			return nil, mapped
 		}
 		return nil, fmt.Errorf("get block by number %d: %w", number, err)
@@ -49,8 +48,7 @@ func (r *BlockRPC) GetLatestBlockNumber(ctx context.Context) (uint64, error) {
 
 	number, err := r.client.BlockNumber(ctx)
 	if err != nil {
-		mapped := mapRPCError(err)
-		if mapped != err {
+		if mapped := mapRPCError(err); mapped != nil {
 			return 0, mapped
 		}
 		return 0, fmt.Errorf("get latest block number: %w", err)
