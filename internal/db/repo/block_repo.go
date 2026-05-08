@@ -21,8 +21,7 @@ func NewBlockRepository(db *gorm.DB) *BlockRepository {
 
 func (r *BlockRepository) InsertBlock(ctx context.Context, block *models.Block) error {
 	if err := r.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(block).Error; err != nil {
-		mapped := mapDBError(err)
-		if mapped != err {
+		if mapped := mapDBError(err); mapped != nil {
 			return mapped
 		}
 		return fmt.Errorf("insert block: %w", err)
@@ -35,8 +34,7 @@ func (r *BlockRepository) GetLatestBlockNumber(ctx context.Context) (uint64, boo
 
 	err := r.db.WithContext(ctx).Model(&models.Block{}).Select("MAX(number)").Scan(&latestNumber).Error
 	if err != nil {
-		mapped := mapDBError(err)
-		if mapped != err {
+		if mapped := mapDBError(err); mapped != nil {
 			return 0, false, mapped
 		}
 		return 0, false, fmt.Errorf("query latest block number: %w", err)
@@ -57,8 +55,7 @@ func (r *BlockRepository) GetBlockByNumber(ctx context.Context, number uint64) (
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, false, nil
 		}
-		mapped := mapDBError(err)
-		if mapped != err {
+		if mapped := mapDBError(err); mapped != nil {
 			return nil, false, mapped
 		}
 		return nil, false, fmt.Errorf("query block by number %d: %w", number, err)
