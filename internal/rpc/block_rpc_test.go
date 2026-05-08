@@ -31,6 +31,34 @@ func newTestBlockRPC(t *testing.T, url string) *BlockRPC {
 	return NewBlockRPC(ethClient, rpcClient, 5)
 }
 
+func decodeJSONRPCRequest(t *testing.T, r *http.Request, expectedMethod string) jsonRPCRequest {
+	t.Helper()
+
+	if r.Method != http.MethodPost {
+		t.Fatalf("expected POST, got %s", r.Method)
+	}
+
+	var req jsonRPCRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		t.Fatalf("decode request: %v", err)
+	}
+
+	if req.Method != expectedMethod {
+		t.Fatalf("expected method %s, got %s", expectedMethod, req.Method)
+	}
+
+	return req
+}
+
+func writeJSONResponse(t *testing.T, w http.ResponseWriter, resp any) {
+	t.Helper()
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		t.Fatalf("encode response: %v", err)
+	}
+}
+
 func TestBlockRPC_GetLatestBlockNumber_ReturnsErrorWhenHTTPStatusNotOK(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -78,22 +106,13 @@ func TestBlockRPC_GetLatestBlockNumber_ReturnsErrorWhenResponseBodyInvalidJSON(t
 
 func TestBlockRPC_GetLatestBlockNumber_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			t.Fatalf("expected POST, got %s", r.Method)
-		}
-		var req jsonRPCRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			t.Fatalf("decode request: %v", err)
-		}
-		if req.Method != "eth_blockNumber" {
-			t.Fatalf("expected method eth_blockNumber, got %s", req.Method)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
+		req := decodeJSONRPCRequest(t, r, "eth_blockNumber")
+		resp := map[string]any{
 			"jsonrpc": "2.0",
-			"id": 1,
-			"result": "0x10"
-		}`))
+			"id":      req.ID,
+			"result":  "0x10",
+		}
+		writeJSONResponse(t, w, resp)
 	}))
 	t.Cleanup(server.Close)
 
@@ -110,25 +129,16 @@ func TestBlockRPC_GetLatestBlockNumber_Success(t *testing.T) {
 
 func TestBlockRPC_GetLatestBlockNumber_ReturnsErrorWhenRPCReturnsError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			t.Fatalf("expected POST, got %s", r.Method)
+		req := decodeJSONRPCRequest(t, r, "eth_blockNumber")
+		resp := map[string]any{
+			"jsonrpc": "2.0",
+			"id":      req.ID,
+			"error": map[string]any{
+				"code":    -32000,
+				"message": "execution error",
+			},
 		}
-		var req jsonRPCRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			t.Fatalf("decode request: %v", err)
-		}
-		if req.Method != "eth_blockNumber" {
-			t.Fatalf("expected method eth_blockNumber, got %s", req.Method)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
-		"jsonrpc": "2.0",
-		"id": 1,
-		"error": {
-		"code": -32000,
-		"message": "execution error"
-		}
-	}`))
+		writeJSONResponse(t, w, resp)
 	}))
 	t.Cleanup(server.Close)
 
@@ -147,22 +157,13 @@ func TestBlockRPC_GetLatestBlockNumber_ReturnsErrorWhenRPCReturnsError(t *testin
 
 func TestBlockRPC_GetLatestBlockNumber_ReturnsErrorWhenResultIsInvalid(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			t.Fatalf("expected POST, got %s", r.Method)
+		req := decodeJSONRPCRequest(t, r, "eth_blockNumber")
+		resp := map[string]any{
+			"jsonrpc": "2.0",
+			"id":      req.ID,
+			"result":  "not-a-hex",
 		}
-		var req jsonRPCRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			t.Fatalf("decode request: %v", err)
-		}
-		if req.Method != "eth_blockNumber" {
-			t.Fatalf("expected method eth_blockNumber, got %s", req.Method)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
-		"jsonrpc": "2.0",
-		"id": 1,
-		"result": "not-a-hex"
-		}`))
+		writeJSONResponse(t, w, resp)
 	}))
 	t.Cleanup(server.Close)
 
@@ -225,18 +226,38 @@ func TestBlockRPC_GetBlockByNumber_ReturnsErrorWhenResponseBodyInvalidJSON(t *te
 	}
 }
 
+func fakeBlockResult() map[string]any {
+	zeroHash := "0x" + strings.Repeat("00", 32)
+	oneHash := "0x" + strings.Repeat("11", 32)
+	zeroBloom := "0x" + strings.Repeat("00", 256)
+
+	return map[string]any{
+		"number":           "0x1",
+		"hash":             oneHash,
+		"parentHash":       zeroHash,
+		"nonce":            "0x0000000000000000",
+		"sha3Uncles":       "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+		"logsBloom":        zeroBloom,
+		"transactionsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+		"stateRoot":        zeroHash,
+		"receiptsRoot":     zeroHash,
+		"miner":            "0x0000000000000000000000000000000000000001",
+		"difficulty":       "0x0",
+		"totalDifficulty":  "0x0",
+		"extraData":        "0x",
+		"size":             "0x1",
+		"gasLimit":         "0x1c9c380",
+		"gasUsed":          "0x5208",
+		"timestamp":        "0x65",
+		"transactions":     []any{},
+		"uncles":           []any{},
+		"baseFeePerGas":    "0x1",
+	}
+}
+
 func TestBlockRPC_GetBlockByNumber_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			t.Fatalf("expected POST, got %s", r.Method)
-		}
-		var req jsonRPCRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			t.Fatalf("decode request: %v", err)
-		}
-		if req.Method != "eth_getBlockByNumber" {
-			t.Fatalf("expected method eth_getBlockByNumber, got %s", req.Method)
-		}
+		req := decodeJSONRPCRequest(t, r, "eth_getBlockByNumber")
 		if len(req.Params) != 2 {
 			t.Fatalf("expected 2 params, got %d", len(req.Params))
 		}
@@ -255,41 +276,13 @@ func TestBlockRPC_GetBlockByNumber_Success(t *testing.T) {
 		if !fullTx {
 			t.Fatalf("expected fullTx true")
 		}
-		zeroHash := "0x" + strings.Repeat("00", 32)
-		oneHash := "0x" + strings.Repeat("11", 32)
-		zeroBloom := "0x" + strings.Repeat("00", 256)
 
 		resp := map[string]any{
 			"jsonrpc": "2.0",
 			"id":      req.ID,
-			"result": map[string]any{
-				"number":           "0x1",
-				"hash":             oneHash,
-				"parentHash":       zeroHash,
-				"nonce":            "0x0000000000000000",
-				"sha3Uncles":       "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
-				"logsBloom":        zeroBloom,
-				"transactionsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
-				"stateRoot":        zeroHash,
-				"receiptsRoot":     zeroHash,
-				"miner":            "0x0000000000000000000000000000000000000001",
-				"difficulty":       "0x0",
-				"totalDifficulty":  "0x0",
-				"extraData":        "0x",
-				"size":             "0x1",
-				"gasLimit":         "0x1c9c380",
-				"gasUsed":          "0x5208",
-				"timestamp":        "0x65",
-				"transactions":     []any{},
-				"uncles":           []any{},
-				"baseFeePerGas":    "0x1",
-			},
+			"result":  fakeBlockResult(),
 		}
-
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(resp); err != nil {
-			t.Fatalf("encode response: %v", err)
-		}
+		writeJSONResponse(t, w, resp)
 	}))
 	t.Cleanup(server.Close)
 
@@ -315,16 +308,7 @@ func TestBlockRPC_GetBlockByNumber_Success(t *testing.T) {
 
 func TestBlockRPC_GetBlockByNumber_ReturnsErrBlockNotFoundWhenResultIsNull(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			t.Fatalf("expected POST, got %s", r.Method)
-		}
-		var req jsonRPCRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			t.Fatalf("decode request: %v", err)
-		}
-		if req.Method != "eth_getBlockByNumber" {
-			t.Fatalf("expected method eth_getBlockByNumber, got %s", req.Method)
-		}
+		req := decodeJSONRPCRequest(t, r, "eth_getBlockByNumber")
 		if len(req.Params) != 2 {
 			t.Fatalf("expected 2 params, got %d", len(req.Params))
 		}
@@ -341,11 +325,7 @@ func TestBlockRPC_GetBlockByNumber_ReturnsErrBlockNotFoundWhenResultIsNull(t *te
 			"id":      req.ID,
 			"result":  nil,
 		}
-
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(resp); err != nil {
-			t.Fatalf("encode response: %v", err)
-		}
+		writeJSONResponse(t, w, resp)
 	}))
 	t.Cleanup(server.Close)
 	blockRPC := newTestBlockRPC(t, server.URL)
@@ -365,16 +345,7 @@ func TestBlockRPC_GetBlockByNumber_ReturnsErrBlockNotFoundWhenResultIsNull(t *te
 
 func TestBlockRPC_GetBlockByNumber_ReturnsErrorWhenRPCReturnsError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			t.Fatalf("expected POST, got %s", r.Method)
-		}
-		var req jsonRPCRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			t.Fatalf("decode request: %v", err)
-		}
-		if req.Method != "eth_getBlockByNumber" {
-			t.Fatalf("expected method eth_getBlockByNumber, got %s", req.Method)
-		}
+		req := decodeJSONRPCRequest(t, r, "eth_getBlockByNumber")
 		resp := map[string]any{
 			"jsonrpc": "2.0",
 			"id":      req.ID,
@@ -383,10 +354,7 @@ func TestBlockRPC_GetBlockByNumber_ReturnsErrorWhenRPCReturnsError(t *testing.T)
 				"message": "invalid argument",
 			},
 		}
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(resp); err != nil {
-			t.Fatalf("encode response: %v", err)
-		}
+		writeJSONResponse(t, w, resp)
 	}))
 	t.Cleanup(server.Close)
 	blockRPC := newTestBlockRPC(t, server.URL)
