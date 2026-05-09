@@ -1,221 +1,318 @@
 # Block Explorer Backend (Go)
 
-一个基于 Go 实现的区块链浏览器后端（工程级项目），支持区块 / 交易 / 地址查询，并逐步演进为带索引器和持久化存储的完整系统。
+一个基于 Go 实现的区块链浏览器后端项目，目标是做成**可运行、可测试、可解释、可用于面试展示的工程级后端系统**，而不是简单 demo。
 
-当前版本已具备 **数据库持久化 + 最小 Indexer（手动驱动）能力**。
-
----
-
-## 🚀 Features（当前能力）
-
-### 查询能力（RPC）
-
-* 查询区块（Block）
-* 查询交易（Transaction）
-* 查询地址（Address）
-* 基于 Ethereum JSON-RPC
-
-### 数据存储
-
-* PostgreSQL 持久化（Block）
-* GORM 作为 ORM
-* 幂等写入（`ON CONFLICT DO NOTHING`）
-
-### Indexer（同步器）
-
-* 单块同步（`POST /block/sync/:number`）
-* 区间同步（`POST /blocks/sync`）
-* 自动计算同步进度（DB vs RPC）
-* 计算下一同步块（next_to_sync）
-* **Run Once 调试能力（手动推进同步）**
-
-### 工程能力
-
-* 分层架构（controller / service / rpc / repo）
-* 统一错误处理（error mapping）
-* DTO / Raw 数据分层
-* 可观测同步状态（debug endpoints）
+当前阶段聚焦 **Block 查询与同步链路**，已经完成 controller / service / rpc / repo / indexer / mapper / types 分层，并补齐了较完整的单元测试。
 
 ---
 
-## 🧱 Project Structure
+## 当前状态
+
+### 已完成
+
+- Block 查询接口
+- Block RPC 封装
+- Block PostgreSQL 持久化
+- Block DTO / mapper 映射
+- Block indexer 同步决策
+- Indexer run-once 调试接口
+- 基础自动 indexer runner（当前代码中已启动，后续会改为配置控制）
+- RPC / DB 错误映射
+- Graceful shutdown 基础逻辑
+- 单元测试覆盖：controller / service / repo / mapper / indexer / rpc
+
+### 暂未完成
+
+- finalized / safe block 同步策略
+- confirmation depth 配置
+- parent hash 连续性校验
+- reorg 检测与回滚
+- transaction 入库
+- address 聚合索引
+- indexer retry / backoff / worker pool
+- metrics / tracing
+
+---
+
+## 技术栈
+
+- Go
+- Gin
+- PostgreSQL
+- GORM
+- Ethereum JSON-RPC
+- go-ethereum
+- httptest / testing
+
+---
+
+## 项目结构
 
 ```bash
 block-explorer-backend/
-├── cmd/server/            # 程序入口
+├── api/                    # 路由注册
+├── cmd/server/             # 程序入口
+├── configs/                # 配置模板，本地配置不提交
 ├── internal/
-│   ├── app/               # 应用初始化 / runtime 管理
-│   ├── config/            # 配置管理
-│   ├── controller/        # HTTP 层
-│   ├── service/           # 业务逻辑层
-│   ├── rpc/               # 链上 RPC 封装
-│   ├── repo/              # 数据访问层（DB）
-│   └── types/             # DTO / 数据结构
+│   ├── app/                # 应用装配、依赖初始化、HTTP server 生命周期
+│   ├── config/             # YAML 配置加载
+│   ├── controller/         # HTTP controller 层
+│   ├── db/
+│   │   ├── models/         # GORM model
+│   │   └── repo/           # Repository / DB 访问层
+│   ├── indexer/            # Block indexer 与 runner
+│   ├── mapper/             # RPC / Entity / DTO 映射
+│   ├── rpc/                # Ethereum JSON-RPC 访问层
+│   ├── service/            # 业务编排层
+│   ├── types/              # DTO、错误定义、response 结构
+│   └── utils/              # 通用工具函数
+├── migrations/             # SQL migration 草稿
+└── scripts/                # 本地脚本
 ```
 
 ---
 
-## 🔧 Tech Stack
+## 快速开始
 
-* Go
-* gin（HTTP 框架）
-* PostgreSQL
-* GORM
-* Ethereum JSON-RPC
+### 1. 准备 PostgreSQL
 
----
+创建数据库：
 
-## ▶️ Run
+```sql
+CREATE DATABASE block_explorer;
+```
+
+### 2. 准备配置文件
+
+真实配置文件不会提交到 GitHub。请从 example 文件复制一份：
+
+```bash
+cp configs/config.example.yaml configs/config.yaml
+```
+
+然后编辑：
+
+```bash
+configs/config.yaml
+```
+
+填写你的本地 PostgreSQL DSN 和 Ethereum RPC URL，例如：
+
+```yaml
+server:
+  port: "8080"
+
+rpc:
+  rpc_url: "https://your-ethereum-rpc-url"
+  timeout_seconds: 10
+
+db:
+  dsn: "host=127.0.0.1 user=postgres password=your_password dbname=block_explorer port=5432 sslmode=disable TimeZone=Asia/Shanghai"
+```
+
+### 3. 安装依赖并启动
 
 ```bash
 go mod tidy
-go run cmd/server/main.go
+go run ./cmd/server/main.go
+```
+
+健康检查：
+
+```bash
+curl http://localhost:8080/health
 ```
 
 ---
 
-## 🌐 API
+## API
 
-### 查询接口
+### Health
 
 ```bash
-GET /tx/:hash
-GET /block/:number
-GET /address/:address
+GET /health
 ```
 
----
-
-### 同步接口（Indexer）
-
-#### 单块同步
+### Block
 
 ```bash
+GET  /block/:number
 POST /block/sync/:number
+POST /blocks/sync?start=0&end=10
 ```
 
-#### 区间同步
+### Indexer
 
 ```bash
-POST /blocks/sync?start=...&end=...
-```
-
----
-
-### Indexer Debug
-
-#### 执行一次同步（Run Once）
-
-```bash
+GET  /indexer/status
 POST /indexer/run-once
 ```
 
 示例：
 
 ```bash
+curl http://localhost:8080/indexer/status | jq
 curl -X POST http://localhost:8080/indexer/run-once | jq
 ```
 
-返回：
+### Transaction
 
-```json
-{
-  "db_latest": 3,
-  "rpc_latest": 24912549,
-  "next_to_sync": 4,
-  "synced": true,
-  "synced_block": 4
+```bash
+GET /tx/:hash
+```
+
+### Address
+
+```bash
+GET /address/:address
+```
+
+### Debug
+
+```bash
+GET /debug/db-stats
+```
+
+---
+
+## Block 线设计
+
+### 分层职责
+
+- `controller`：只处理 HTTP 参数、状态码、response。
+- `service`：负责业务编排，例如 DB-first 查询、RPC fallback、同步流程。
+- `rpc`：只负责和 Ethereum JSON-RPC 交互，并把外部错误转换为内部错误。
+- `repo`：只负责数据库读写和 DB 错误映射。
+- `indexer`：负责判断下一个要同步的 block，并驱动同步。
+- `mapper`：负责 RPC block、DB entity、DTO 之间的转换。
+
+### 当前同步模型
+
+当前 indexer 使用 DB 作为进度源：
+
+```text
+DB latest block number
+        ↓
+next = latest + 1
+        ↓
+和 RPC latest 对比
+        ↓
+决定是否同步 next block
+```
+
+如果 DB 为空，则从 block `0` 开始。
+
+### 后续稳定同步策略
+
+当前版本还没有实现 finalized / safe 同步边界。后续更合理的设计是：
+
+```text
+stable_target = finalized block
+或 stable_target = latest - confirmation_depth
+```
+
+DB 只持久化稳定区块；latest 附近的区块可以通过 RPC 查询，但不默认写入 DB，避免 reorg 带来的数据修正复杂度。
+
+---
+
+## 测试覆盖
+
+当前 block 线已经覆盖：
+
+- `block_controller_test`
+- `block_service_test`
+- `block_repo_test`
+- `block_mapper_test`
+- `block_indexer_test`
+- `block_rpc_test`
+- `rpc_error_test`
+
+运行全部测试：
+
+```bash
+go test ./...
+```
+
+RPC 测试使用 `httptest.Server` 模拟 Ethereum JSON-RPC，不连接真实节点。
+
+已覆盖的 RPC 场景包括：
+
+- `GetLatestBlockNumber` success
+- `GetLatestBlockNumber` JSON-RPC error
+- `GetLatestBlockNumber` invalid result
+- `GetLatestBlockNumber` HTTP 500
+- `GetLatestBlockNumber` invalid JSON
+- `GetBlockByNumber` success
+- `GetBlockByNumber` result null -> `ErrBlockNotFound`
+- `GetBlockByNumber` JSON-RPC error
+- `GetBlockByNumber` HTTP 500
+- `GetBlockByNumber` invalid JSON
+- `mapRPCError` canceled / timeout / unknown / nil
+
+---
+
+## 错误处理原则
+
+项目中避免直接比较外部库返回的 `error`，例如不要使用：
+
+```go
+if mapped != err { ... }
+```
+
+统一使用：
+
+```go
+if errors.Is(err, targetErr) { ... }
+
+if mapped := mapRPCError(err); mapped != nil {
+    return mapped
 }
+
+return fmt.Errorf("operation context: %w", err)
 ```
 
----
-
-#### 查看同步状态
-
-```bash
-GET /indexer/status
-```
+这样可以避免某些外部错误类型不可比较导致 panic，同时保留原始错误上下文。
 
 ---
 
-## 📌 Current Stage
+## Roadmap
 
-当前阶段：
+### Block 线
 
-👉 **Block Indexing MVP（手动驱动）**
+- [x] Block 查询
+- [x] Block DB 持久化
+- [x] Block mapper
+- [x] Block indexer run-once
+- [x] Block RPC 测试
+- [ ] Indexer runner 配置化
+- [ ] confirmation depth / finalized target
+- [ ] parent hash 连续性校验
+- [ ] reorg 检测与恢复
 
-已完成：
+### Transaction / Address 线
 
-* Block 持久化
-* 幂等写入
-* 同步进度计算
-* 单轮 indexer 执行（RunOnce）
+- [ ] Transaction 入库
+- [ ] Address 聚合
+- [ ] Token transfer / log 解析
 
-未完成：
+### 工程能力
 
-* 自动 indexer loop
-* transaction / address 索引
-* retry / 并发优化
-
----
-
-## 🗺️ Roadmap
-
-* [ ] Indexer Loop（自动同步）
-* [ ] Transaction 入库
-* [ ] Address 聚合
-* [ ] Log / Event 解析
-* [ ] 缓存层（Redis）
-* [ ] 并发同步优化（worker pool）
-* [ ] 可观测性（metrics / tracing）
+- [ ] retry / backoff
+- [ ] worker pool 并发同步
+- [ ] Redis 缓存
+- [ ] metrics / tracing
+- [ ] migration 工具化
 
 ---
 
-## 💡 Design Notes
+## 项目目标
 
-* Controller 层只负责 HTTP
-* Service 层负责业务编排
-* Repo 层负责 DB 访问
-* RPC 层负责链上交互
-* Indexer 采用“DB 作为进度源”的同步模型
+这个项目的目标是逐步构建一个可以讲清楚的区块链后端系统：
 
----
-
-## 🎯 Goal
-
-该项目目标是实现一个：
-
-👉 **可运行 / 可调试 / 可扩展 / 可用于面试的区块链后端系统**
-
-而不是简单 demo
-
----
-
-## 👤 Author
-
-* Go backend learner transitioning into blockchain
-* Focus on building real-world backend systems
-
----
-
-## Database
-
-PostgreSQL
-
-### Setup
-
-```sql
-CREATE DATABASE block_explorer;
-```
-
-配置：
-
-```yaml
-configs/config.yaml
-```
-
-运行：
-
-```bash
-go run ./cmd/server/main.go
-```
+- 能运行
+- 能测试
+- 能 debug
+- 分层清楚
+- 错误处理清楚
+- 能解释设计取舍
+- 能作为区块链后端求职项目展示
