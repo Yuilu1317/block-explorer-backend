@@ -8,15 +8,17 @@ import (
 )
 
 type fakeBlockRPC struct {
-	latestNumber uint64
+	targetNumber uint64
 	err          error
 
-	getLatestCalled bool
+	getTargetCalled bool
+	gotTag          string
 }
 
-func (f *fakeBlockRPC) GetLatestBlockNumber(ctx context.Context) (uint64, error) {
-	f.getLatestCalled = true
-	return f.latestNumber, f.err
+func (f *fakeBlockRPC) GetBlockNumberByTag(ctx context.Context, tag string) (uint64, error) {
+	f.getTargetCalled = true
+	f.gotTag = tag
+	return f.targetNumber, f.err
 }
 
 type fakeBlockRepository struct {
@@ -43,23 +45,27 @@ func (f *fakeBlockService) SyncBlockToDB(ctx context.Context, number uint64) err
 	f.syncedBlock = number
 	return f.err
 }
-
 func setupTestIndexer(t *testing.T) (*BlockIndexer, *fakeBlockRPC, *fakeBlockRepository, *fakeBlockService) {
+	t.Helper()
+	return setupTestIndexerWithConfig(t, "safe", 0)
+}
+
+func setupTestIndexerWithConfig(t *testing.T, syncTarget string, startBlock uint64) (*BlockIndexer, *fakeBlockRPC, *fakeBlockRepository, *fakeBlockService) {
 	t.Helper()
 
 	rpc := &fakeBlockRPC{}
 	repo := &fakeBlockRepository{}
 	service := &fakeBlockService{}
 
-	svc := NewBlockIndexer(rpc, repo, service)
+	svc := NewBlockIndexer(rpc, repo, service, syncTarget, startBlock)
 
 	return svc, rpc, repo, service
 }
 
-func TestBlockIndexer_GetNextBlockToSync_ReturnsLatestBlockNumberPlusOne(t *testing.T) {
+func TestBlockIndexer_GetNextBlockToSync_ReturnsDBLatestPlusOne(t *testing.T) {
 	svc, rpc, repo, _ := setupTestIndexer(t)
 	ctx := context.Background()
-	rpc.latestNumber = 1
+	rpc.targetNumber = 1
 	repo.latestNumber = 1
 	repo.exists = true
 
@@ -74,8 +80,8 @@ func TestBlockIndexer_GetNextBlockToSync_ReturnsLatestBlockNumberPlusOne(t *test
 	if *result.DBLatest != repo.latestNumber {
 		t.Fatalf("GetNextBlockToSync(): expected DBLatest=1, got %v", *result.DBLatest)
 	}
-	if result.RPCLatest != rpc.latestNumber {
-		t.Fatalf("GetNextBlockToSync(): expected RPCLatest=1, got %v", result.RPCLatest)
+	if result.RPCTarget != rpc.targetNumber {
+		t.Fatalf("GetNextBlockToSync(): expected RPCTarget=1, got %v", result.RPCTarget)
 	}
 	if result.Next != repo.latestNumber+1 {
 		t.Fatalf("GetNextBlockToSync(): expected Next=2, got %v", result.Next)
@@ -88,7 +94,7 @@ func TestBlockIndexer_GetNextBlockToSync_ReturnsLatestBlockNumberPlusOne(t *test
 func TestBlockIndexer_GetNextBlockToSync_ShouldSyncWhenRPCIsAhead(t *testing.T) {
 	svc, rpc, repo, _ := setupTestIndexer(t)
 	ctx := context.Background()
-	rpc.latestNumber = 2
+	rpc.targetNumber = 2
 	repo.latestNumber = 1
 	repo.exists = true
 	result, err := svc.GetNextBlockToSync(ctx)
@@ -101,8 +107,8 @@ func TestBlockIndexer_GetNextBlockToSync_ShouldSyncWhenRPCIsAhead(t *testing.T) 
 	if *result.DBLatest != repo.latestNumber {
 		t.Fatalf("GetNextBlockToSync(): expected DBLatest=1, got %v", *result.DBLatest)
 	}
-	if result.RPCLatest != rpc.latestNumber {
-		t.Fatalf("GetNextBlockToSync(): expected RPCLatest=2, got %v", result.RPCLatest)
+	if result.RPCTarget != rpc.targetNumber {
+		t.Fatalf("GetNextBlockToSync(): expected RPCTarget=2, got %v", result.RPCTarget)
 	}
 	if result.Next != repo.latestNumber+1 {
 		t.Fatalf("GetNextBlockToSync(): expected Next=2, got %v", result.Next)
@@ -112,24 +118,30 @@ func TestBlockIndexer_GetNextBlockToSync_ShouldSyncWhenRPCIsAhead(t *testing.T) 
 	}
 }
 
-func TestBlockIndexer_GetNextBlockToSync_StartsFromZeroWhenDBIsEmpty(t *testing.T) {
-	svc, rpc, repo, _ := setupTestIndexer(t)
+func TestBlockIndexer_GetNextBlockToSync_StartsFromConfiguredStartBlockWhenDBIsEmpty(t *testing.T) {
+	svc, rpc, repo, _ := setupTestIndexerWithConfig(t, "safe", 100)
+
 	ctx := context.Background()
-	rpc.latestNumber = 5
+	rpc.targetNumber = 150
 	repo.exists = false
+
 	result, err := svc.GetNextBlockToSync(ctx)
 	if err != nil {
 		t.Fatalf("GetNextBlockToSync(): %v", err)
 	}
+
 	if result.DBLatest != nil {
-		t.Fatalf("GetNextBlockToSync(): expected DBLatest nil，got %d", *result.DBLatest)
+		t.Fatalf("GetNextBlockToSync(): expected DBLatest nil, got %d", *result.DBLatest)
 	}
-	if result.RPCLatest != rpc.latestNumber {
-		t.Fatalf("GetNextBlockToSync(): expected RPCLatest=%d, got %d", rpc.latestNumber, result.RPCLatest)
+
+	if result.RPCTarget != rpc.targetNumber {
+		t.Fatalf("GetNextBlockToSync(): expected RPCTarget=%d, got %d", rpc.targetNumber, result.RPCTarget)
 	}
-	if result.Next != 0 {
-		t.Fatalf("GetNextBlockToSync(): expected Next=0, got %v", result.Next)
+
+	if result.Next != 100 {
+		t.Fatalf("GetNextBlockToSync(): expected Next=100, got %d", result.Next)
 	}
+
 	if !result.ShouldSync {
 		t.Fatalf("GetNextBlockToSync(): expected ShouldSync=true, got false")
 	}
@@ -149,7 +161,7 @@ func TestBlockIndexer_GetNextBlockToSync_ReturnsErrorWhenRepoFails(t *testing.T)
 	if !errors.Is(err, types.ErrDBTimeout) {
 		t.Fatalf("expected timeout error, got %v", err)
 	}
-	if rpc.getLatestCalled {
+	if rpc.getTargetCalled {
 		t.Fatalf("expected rpc not to be called when repo fails")
 	}
 }
@@ -173,7 +185,7 @@ func TestBlockIndexer_GetNextBlockToSync_ReturnsErrorWhenRPCFails(t *testing.T) 
 	if !repo.getLatestCalled {
 		t.Fatalf("expected DB to be called when rpc fails")
 	}
-	if !rpc.getLatestCalled {
+	if !rpc.getTargetCalled {
 		t.Fatalf("expected RPC to be called")
 	}
 }
@@ -183,7 +195,7 @@ func TestBlockIndexer_RunIndexerOnce_SyncsNextBlockWhenShouldSyncTrue(t *testing
 	ctx := context.Background()
 	repo.latestNumber = 1
 	repo.exists = true
-	rpc.latestNumber = 2
+	rpc.targetNumber = 2
 
 	result, err := svc.RunIndexerOnce(ctx)
 	if err != nil {
@@ -195,8 +207,11 @@ func TestBlockIndexer_RunIndexerOnce_SyncsNextBlockWhenShouldSyncTrue(t *testing
 	if *result.DBLatest != repo.latestNumber {
 		t.Fatalf("RunIndexerOnce(): expected DBLatest=%d, got %d", repo.latestNumber, *result.DBLatest)
 	}
-	if result.RPCLatest != rpc.latestNumber {
-		t.Fatalf("RunIndexerOnce(): expected RPCLatest=%d, got %d", rpc.latestNumber, result.RPCLatest)
+	if result.RPCTarget != rpc.targetNumber {
+		t.Fatalf("RunIndexerOnce(): expected RPCTarget=%d, got %d", rpc.targetNumber, result.RPCTarget)
+	}
+	if result.SyncTarget != "safe" {
+		t.Fatalf("RunIndexerOnce(): expected SyncTarget=safe, got %s", result.SyncTarget)
 	}
 	wantNext := repo.latestNumber + 1
 	if result.NextToSync != wantNext {
@@ -215,7 +230,7 @@ func TestBlockIndexer_RunIndexerOnce_DoesNotSyncWhenNoNewBlock(t *testing.T) {
 	ctx := context.Background()
 	repo.latestNumber = 1
 	repo.exists = true
-	rpc.latestNumber = 1
+	rpc.targetNumber = 1
 	result, err := svc.RunIndexerOnce(ctx)
 	if err != nil {
 		t.Fatalf("RunIndexerOnce(): %v", err)
@@ -226,8 +241,8 @@ func TestBlockIndexer_RunIndexerOnce_DoesNotSyncWhenNoNewBlock(t *testing.T) {
 	if *result.DBLatest != repo.latestNumber {
 		t.Fatalf("RunIndexerOnce(): expected DBLatest=%d, got %d", repo.latestNumber, *result.DBLatest)
 	}
-	if result.RPCLatest != rpc.latestNumber {
-		t.Fatalf("RunIndexerOnce(): expected RPCLatest=%d, got %d", rpc.latestNumber, result.RPCLatest)
+	if result.RPCTarget != rpc.targetNumber {
+		t.Fatalf("RunIndexerOnce(): expected RPCTarget=%d, got %d", rpc.targetNumber, result.RPCTarget)
 	}
 	wantNext := repo.latestNumber + 1
 	if result.NextToSync != wantNext {
@@ -254,7 +269,7 @@ func TestBlockIndexer_RunIndexerOnce_ReturnsErrorWhenGetNextBlockFails(t *testin
 	if !errors.Is(err, types.ErrRPCTimeout) {
 		t.Fatalf("RunIndexerOnce(): expected timeout error, got %v", err)
 	}
-	if !rpc.getLatestCalled {
+	if !rpc.getTargetCalled {
 		t.Fatalf("expected RPC to be called after DB succeeds")
 	}
 	if service.syncCalled {
@@ -267,7 +282,7 @@ func TestBlockIndexer_RunIndexerOnce_ReturnsErrorWhenSyncFails(t *testing.T) {
 	ctx := context.Background()
 	repo.latestNumber = 1
 	repo.exists = true
-	rpc.latestNumber = 2
+	rpc.targetNumber = 2
 	service.err = types.ErrDBTimeout
 	result, err := svc.RunIndexerOnce(ctx)
 	if err == nil {
@@ -283,10 +298,40 @@ func TestBlockIndexer_RunIndexerOnce_ReturnsErrorWhenSyncFails(t *testing.T) {
 	if service.syncedBlock != wantNext {
 		t.Fatalf("expected syncedBlock=%d, got %d", wantNext, service.syncedBlock)
 	}
-	if !rpc.getLatestCalled {
+	if !rpc.getTargetCalled {
 		t.Fatalf("expected RPC to be called before sync")
 	}
 	if !service.syncCalled {
 		t.Fatalf("expected Sync=true, got false")
+	}
+}
+
+func TestBlockIndexer_GetNextBlockToSync_UsesSyncTarget(t *testing.T) {
+	svc, rpc, repo, _ := setupTestIndexerWithConfig(t, "finalized", 0)
+
+	ctx := context.Background()
+	repo.latestNumber = 10
+	repo.exists = true
+	rpc.targetNumber = 20
+
+	result, err := svc.GetNextBlockToSync(ctx)
+	if err != nil {
+		t.Fatalf("GetNextBlockToSync(): %v", err)
+	}
+
+	if !rpc.getTargetCalled {
+		t.Fatalf("expected RPC target to be called")
+	}
+
+	if rpc.gotTag != "finalized" {
+		t.Fatalf("expected sync target finalized, got %s", rpc.gotTag)
+	}
+
+	if result.SyncTarget != "finalized" {
+		t.Fatalf("expected result SyncTarget finalized, got %s", result.SyncTarget)
+	}
+
+	if result.RPCTarget != rpc.targetNumber {
+		t.Fatalf("expected RPCTarget=%d, got %d", rpc.targetNumber, result.RPCTarget)
 	}
 }

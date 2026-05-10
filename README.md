@@ -284,6 +284,9 @@ return fmt.Errorf("operation context: %w", err)
 - [x] Block mapper
 - [x] Block indexer run-once
 - [x] Block RPC 测试
+- [x] Indexer runner 配置化
+- [x] safe / finalized / latest sync target
+- [x] start_block 配置
 - [ ] Indexer runner 配置化
 - [ ] confirmation depth / finalized target
 - [ ] parent hash 连续性校验
@@ -305,14 +308,21 @@ return fmt.Errorf("operation context: %w", err)
 
 ---
 
-## 项目目标
+### Indexer Configuration
 
-这个项目的目标是逐步构建一个可以讲清楚的区块链后端系统：
+The indexer is controlled by `configs/config.yaml`:
 
-- 能运行
-- 能测试
-- 能 debug
-- 分层清楚
-- 错误处理清楚
-- 能解释设计取舍
-- 能作为区块链后端求职项目展示
+```yaml
+indexer:
+  auto_start: false
+  interval_seconds: 2
+  run_timeout_seconds: 3
+  sync_target: safe
+  start_block: 0
+auto_start: whether to start the background indexer when the server starts.
+interval_seconds: interval between automatic indexer runs.
+run_timeout_seconds: timeout for each indexer run.
+sync_target: the highest block tag the indexer syncs to. Supported values: latest, safe, finalized.
+start_block: the first block to sync when the database is empty.
+
+For this MVP, the default sync_target is safe, which balances freshness and stability. Full reorg handling is not implemented yet.

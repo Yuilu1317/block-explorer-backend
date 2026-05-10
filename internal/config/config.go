@@ -8,9 +8,10 @@ import (
 )
 
 type Config struct {
-	Server ServerConfig `yaml:"server"`
-	Rpc    RpcConfig    `yaml:"rpc"`
-	DB     DBConfig     `yaml:"db"`
+	Server  ServerConfig  `yaml:"server"`
+	Rpc     RpcConfig     `yaml:"rpc"`
+	DB      DBConfig      `yaml:"db"`
+	Indexer IndexerConfig `yaml:"indexer"`
 }
 
 type ServerConfig struct {
@@ -24,6 +25,14 @@ type RpcConfig struct {
 
 type DBConfig struct {
 	DSN string `yaml:"dsn"`
+}
+
+type IndexerConfig struct {
+	AutoStart         bool   `yaml:"auto_start"`
+	IntervalSeconds   int    `yaml:"interval_seconds"`
+	RunTimeoutSeconds int    `yaml:"run_timeout_seconds"`
+	SyncTarget        string `yaml:"sync_target"`
+	StartBlock        uint64 `yaml:"start_block"`
 }
 
 func Load(path string) (*Config, error) {
@@ -49,6 +58,22 @@ func Load(path string) (*Config, error) {
 
 	if cfg.DB.DSN == "" {
 		return nil, fmt.Errorf("db.dsn is required")
+	}
+
+	if cfg.Indexer.IntervalSeconds <= 0 {
+		cfg.Indexer.IntervalSeconds = 2
+	}
+
+	if cfg.Indexer.RunTimeoutSeconds <= 0 {
+		cfg.Indexer.RunTimeoutSeconds = 3
+	}
+	if cfg.Indexer.SyncTarget == "" {
+		cfg.Indexer.SyncTarget = "safe"
+	}
+	if cfg.Indexer.SyncTarget != "latest" &&
+		cfg.Indexer.SyncTarget != "safe" &&
+		cfg.Indexer.SyncTarget != "finalized" {
+		return nil, fmt.Errorf("invalid indexer sync_target: %s", cfg.Indexer.SyncTarget)
 	}
 
 	return &cfg, nil

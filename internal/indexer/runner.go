@@ -57,9 +57,10 @@ func (r *Runner) Start(ctx context.Context) {
 				dbLatest = fmt.Sprintf("%d", *result.DBLatest)
 			}
 			log.Printf(
-				"[indexer-runner] db=%s rpc=%d next=%d synced=%v\n",
+				"[indexer-runner] sync_target=%s db=%s rpc_target=%d next=%d synced=%v\n",
+				result.SyncTarget,
 				dbLatest,
-				result.RPCLatest,
+				result.RPCTarget,
 				result.NextToSync,
 				result.Synced,
 			)

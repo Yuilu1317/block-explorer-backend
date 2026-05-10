@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -369,5 +370,171 @@ func TestBlockRPC_GetBlockByNumber_ReturnsErrorWhenRPCReturnsError(t *testing.T)
 
 	if !strings.Contains(err.Error(), "invalid argument") {
 		t.Fatalf("expected error to contain invalid argument, got %v", err)
+	}
+}
+
+func TestBlockRPC_GetBlockNumberByTag_SafeSuccess(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		req := decodeJSONRPCRequest(t, r, "eth_getBlockByNumber")
+		if len(req.Params) != 2 {
+			t.Fatalf("expected 2 params, got %d", len(req.Params))
+		}
+
+		var tag string
+		if err := json.Unmarshal(req.Params[0], &tag); err != nil {
+			t.Fatalf("decode tag param: %v", err)
+		}
+		if tag != "safe" {
+			t.Fatalf("expected tag safe, got %s", tag)
+		}
+
+		var fullTx bool
+		if err := json.Unmarshal(req.Params[1], &fullTx); err != nil {
+			t.Fatalf("decode fullTx param: %v", err)
+		}
+		if fullTx {
+			t.Fatalf("expected fullTx false")
+		}
+		resp := map[string]any{
+			"jsonrpc": "2.0",
+			"id":      req.ID,
+			"result": map[string]any{
+				"number": "0x520",
+			},
+		}
+		writeJSONResponse(t, w, resp)
+	}))
+	t.Cleanup(server.Close)
+	blockRPC := newTestBlockRPC(t, server.URL)
+
+	number, err := blockRPC.GetBlockNumberByTag(context.Background(), "safe")
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+
+	if number != 1312 {
+		t.Fatalf("expected number 1312, got %d", number)
+	}
+}
+
+func TestBlockRPC_GetBlockNumberByTag_InvalidTag(t *testing.T) {
+	var called int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&called, 1)
+	}))
+	t.Cleanup(server.Close)
+	blockRPC := newTestBlockRPC(t, server.URL)
+	number, err := blockRPC.GetBlockNumberByTag(context.Background(), "finalize")
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "invalid block tag") {
+		t.Fatalf("expected invalid block tag error, got %v", err)
+	}
+
+	if number != 0 {
+		t.Fatalf("expected number 0, got %d", number)
+	}
+
+	if atomic.LoadInt32(&called) != 0 {
+		t.Fatalf("expected RPC server not to be called")
+	}
+}
+
+func TestBlockRPC_GetBlockNumberByTag_ReturnsErrBlockNotFoundWhenResultIsNull(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		req := decodeJSONRPCRequest(t, r, "eth_getBlockByNumber")
+
+		if len(req.Params) != 2 {
+			t.Fatalf("expected 2 params, got %d", len(req.Params))
+		}
+
+		var tag string
+		if err := json.Unmarshal(req.Params[0], &tag); err != nil {
+			t.Fatalf("decode tag param: %v", err)
+		}
+		if tag != "safe" {
+			t.Fatalf("expected tag safe, got %s", tag)
+		}
+
+		var fullTx bool
+		if err := json.Unmarshal(req.Params[1], &fullTx); err != nil {
+			t.Fatalf("decode fullTx param: %v", err)
+		}
+		if fullTx {
+			t.Fatalf("expected fullTx false")
+		}
+
+		resp := map[string]any{
+			"jsonrpc": "2.0",
+			"id":      req.ID,
+			"result":  nil,
+		}
+		writeJSONResponse(t, w, resp)
+	}))
+	t.Cleanup(server.Close)
+
+	blockRPC := newTestBlockRPC(t, server.URL)
+
+	number, err := blockRPC.GetBlockNumberByTag(context.Background(), "safe")
+	if !errors.Is(err, types.ErrBlockNotFound) {
+		t.Fatalf("expected ErrBlockNotFound, got %v", err)
+	}
+
+	if number != 0 {
+		t.Fatalf("expected number 0, got %d", number)
+	}
+}
+
+func TestBlockRPC_GetBlockNumberByTag_ReturnsErrorWhenRPCReturnsError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		req := decodeJSONRPCRequest(t, r, "eth_getBlockByNumber")
+
+		if len(req.Params) != 2 {
+			t.Fatalf("expected 2 params, got %d", len(req.Params))
+		}
+
+		var tag string
+		if err := json.Unmarshal(req.Params[0], &tag); err != nil {
+			t.Fatalf("decode tag param: %v", err)
+		}
+		if tag != "safe" {
+			t.Fatalf("expected tag safe, got %s", tag)
+		}
+
+		var fullTx bool
+		if err := json.Unmarshal(req.Params[1], &fullTx); err != nil {
+			t.Fatalf("decode fullTx param: %v", err)
+		}
+		if fullTx {
+			t.Fatalf("expected fullTx false")
+		}
+
+		resp := map[string]any{
+			"jsonrpc": "2.0",
+			"id":      req.ID,
+			"error": map[string]any{
+				"code":    -32602,
+				"message": "invalid argument",
+			},
+		}
+		writeJSONResponse(t, w, resp)
+	}))
+	t.Cleanup(server.Close)
+
+	blockRPC := newTestBlockRPC(t, server.URL)
+
+	number, err := blockRPC.GetBlockNumberByTag(context.Background(), "safe")
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+
+	if number != 0 {
+		t.Fatalf("expected number 0, got %d", number)
+	}
+	if !strings.Contains(err.Error(), "invalid argument") {
+		t.Fatalf("expected invalid argument error, got %v", err)
 	}
 }

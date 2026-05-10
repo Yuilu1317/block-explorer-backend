@@ -60,7 +60,8 @@ func Run() error {
 
 	debugController := controller.NewDebugController(sqlDB)
 
-	blockIndexer := indexer.NewBlockIndexer(blockRPC, blockRepo, blockService)
+	blockIndexer := indexer.NewBlockIndexer(
+		blockRPC, blockRepo, blockService, cfg.Indexer.SyncTarget, cfg.Indexer.StartBlock)
 	indexerController := controller.NewIndexerController(blockIndexer)
 
 	router := api.NewRouter(
@@ -74,8 +75,17 @@ func Run() error {
 	rootCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	runner := indexer.NewRunner(blockIndexer, 2*time.Second, 3*time.Second)
-	go runner.Start(rootCtx)
+	if cfg.Indexer.AutoStart {
+		runner := indexer.NewRunner(
+			blockIndexer,
+			time.Duration(cfg.Indexer.IntervalSeconds)*time.Second,
+			time.Duration(cfg.Indexer.RunTimeoutSeconds)*time.Second,
+		)
+		go runner.Start(rootCtx)
+		log.Println("[indexer-runner] auto start enabled")
+	} else {
+		log.Println("[indexer-runner] auto start disabled")
+	}
 
 	addr := ":" + cfg.Server.Port
 

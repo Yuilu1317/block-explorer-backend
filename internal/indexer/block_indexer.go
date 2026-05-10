@@ -7,7 +7,7 @@ import (
 )
 
 type BlockRPC interface {
-	GetLatestBlockNumber(ctx context.Context) (uint64, error)
+	GetBlockNumberByTag(ctx context.Context, tag string) (uint64, error)
 }
 
 type BlockRepository interface {
@@ -22,13 +22,23 @@ type BlockIndexer struct {
 	blockRPC     BlockRPC
 	blockRepo    BlockRepository
 	blockService BlockService
+	syncTarget   string
+	startBlock   uint64
 }
 
-func NewBlockIndexer(blockRPC BlockRPC, blockRepo BlockRepository, blockService BlockService) *BlockIndexer {
+func NewBlockIndexer(
+	blockRPC BlockRPC,
+	blockRepo BlockRepository,
+	blockService BlockService,
+	syncTarget string,
+	startBlock uint64,
+) *BlockIndexer {
 	return &BlockIndexer{
 		blockRPC:     blockRPC,
 		blockRepo:    blockRepo,
 		blockService: blockService,
+		syncTarget:   syncTarget,
+		startBlock:   startBlock,
 	}
 }
 
@@ -38,9 +48,9 @@ func (s *BlockIndexer) GetNextBlockToSync(ctx context.Context) (*types.IndexerSt
 		return nil, fmt.Errorf("db latest block: %w", err)
 	}
 
-	rpcLatest, err := s.blockRPC.GetLatestBlockNumber(ctx)
+	rpcTarget, err := s.blockRPC.GetBlockNumberByTag(ctx, s.syncTarget)
 	if err != nil {
-		return nil, fmt.Errorf("rpc latest block: %w", err)
+		return nil, fmt.Errorf("rpc target block by tag %s: %w", s.syncTarget, err)
 	}
 
 	var (
@@ -52,14 +62,15 @@ func (s *BlockIndexer) GetNextBlockToSync(ctx context.Context) (*types.IndexerSt
 		dbPtr = &dbLatest
 		next = dbLatest + 1
 	} else {
-		next = 0
+		next = s.startBlock
 	}
 
 	return &types.IndexerStatus{
 		DBLatest:   dbPtr,
-		RPCLatest:  rpcLatest,
+		SyncTarget: s.syncTarget,
+		RPCTarget:  rpcTarget,
 		Next:       next,
-		ShouldSync: next <= rpcLatest,
+		ShouldSync: next <= rpcTarget,
 	}, nil
 }
 
@@ -71,11 +82,12 @@ func (s *BlockIndexer) RunIndexerOnce(ctx context.Context) (*types.IndexerOnceRe
 
 	result := &types.IndexerOnceResult{
 		DBLatest:   status.DBLatest,
-		RPCLatest:  status.RPCLatest,
+		SyncTarget: status.SyncTarget,
+		RPCTarget:  status.RPCTarget,
 		NextToSync: status.Next,
 		Synced:     false,
 	}
-	if status.Next > status.RPCLatest {
+	if !status.ShouldSync {
 		return result, nil
 	}
 
