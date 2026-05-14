@@ -6,8 +6,10 @@ import (
 	"context"
 	"errors"
 	"math/big"
+	"strings"
 	"testing"
 
+	"github.com/ethereum/go-ethereum/common"
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 )
 
@@ -47,6 +49,8 @@ type fakeBlockRepo struct {
 	found bool
 	err   error
 
+	blocks map[uint64]*models.Block
+
 	inserted       bool
 	insertArg      *models.Block
 	insertErr      error
@@ -59,13 +63,25 @@ func (f *fakeBlockRepo) InsertBlock(ctx context.Context, block *models.Block) er
 
 	if block != nil {
 		f.insertedBlocks = append(f.insertedBlocks, block.Number)
+		if f.blocks != nil {
+			f.blocks[block.Number] = block
+		}
 	}
 
 	return f.insertErr
 }
 
 func (f *fakeBlockRepo) GetBlockByNumber(ctx context.Context, number uint64) (*models.Block, bool, error) {
-	return f.block, f.found, f.err
+	if f.err != nil {
+		return nil, false, f.err
+	}
+
+	if f.blocks != nil {
+		block, found := f.blocks[number]
+		return block, found, nil
+	}
+
+	return f.block, f.found, nil
 }
 
 func setupTestService(t *testing.T) (*BlockService, *fakeBlockRepo, *fakeRPC) {
@@ -235,6 +251,142 @@ func TestBlockService_SyncBlockToDB_InsertError(t *testing.T) {
 	}
 	if repo.insertArg.Number != 20 {
 		t.Fatalf("expected inserted block number=20, got %d", repo.insertArg.Number)
+	}
+}
+
+func TestBlockService_SyncBlockToDB_ReturnsNilWhenBlockAlreadyExistsWithSameHash(t *testing.T) {
+	svc, repo, rpc := setupTestService(t)
+	rpc.block = ethtypes.NewBlockWithHeader(&ethtypes.Header{
+		Number: big.NewInt(100),
+	})
+	rpcHash := rpc.block.Hash().Hex()
+	repo.block = &models.Block{
+		Number: 100,
+		Hash:   rpcHash,
+	}
+	repo.found = true
+	err := svc.SyncBlockToDB(context.Background(), 100)
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+
+	if repo.inserted {
+		t.Fatalf("expected InsertBlock not called")
+	}
+}
+
+func TestBlockService_SyncBlockToDB_ReturnsErrReorgDetectedWhenSameHeightHasDifferentHash(t *testing.T) {
+	svc, repo, rpc := setupTestService(t)
+
+	rpc.block = ethtypes.NewBlockWithHeader(&ethtypes.Header{
+		Number: big.NewInt(100),
+	})
+
+	rpcHash := rpc.block.Hash().Hex()
+	dbHash := common.HexToHash("0xbbbb").Hex()
+
+	if strings.EqualFold(rpcHash, dbHash) {
+		t.Fatalf("test setup invalid: rpc hash equals db hash")
+	}
+
+	repo.block = &models.Block{
+		Number: 100,
+		Hash:   dbHash,
+	}
+	repo.found = true
+
+	err := svc.SyncBlockToDB(context.Background(), 100)
+	if !errors.Is(err, types.ErrReorgDetected) {
+		t.Fatalf("expected ErrReorgDetected, got %v", err)
+	}
+
+	if repo.inserted {
+		t.Fatalf("expected InsertBlock not called")
+	}
+}
+
+func TestBlockService_SyncBlockToDB_InsertsBlockWhenParentHashMatches(t *testing.T) {
+	svc, repo, rpc := setupTestService(t)
+
+	parentHash := common.HexToHash("0xaaa")
+
+	rpc.block = ethtypes.NewBlockWithHeader(&ethtypes.Header{
+		Number:     big.NewInt(100),
+		ParentHash: parentHash,
+	})
+
+	repo.blocks = map[uint64]*models.Block{
+		99: {
+			Number: 99,
+			Hash:   parentHash.Hex(),
+		},
+	}
+
+	err := svc.SyncBlockToDB(context.Background(), 100)
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+
+	if !repo.inserted {
+		t.Fatalf("expected InsertBlock to be called")
+	}
+	if repo.insertArg == nil {
+		t.Fatalf("expected inserted block, got nil")
+	}
+
+	if repo.insertArg.Number != 100 {
+		t.Fatalf("expected inserted block number=100, got %d", repo.insertArg.Number)
+	}
+}
+
+func TestBlockService_SyncBlockToDB_AllowsSyncFromLocalStartBlockWhenParentIsMissing(t *testing.T) {
+	svc, repo, rpc := setupTestService(t)
+	rpc.block = ethtypes.NewBlockWithHeader(&ethtypes.Header{
+		Number:     big.NewInt(100),
+		ParentHash: common.HexToHash("0xaaa"),
+	})
+	repo.blocks = map[uint64]*models.Block{}
+	err := svc.SyncBlockToDB(context.Background(), 100)
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+
+	if !repo.inserted {
+		t.Fatalf("expected InsertBlock to be called")
+	}
+
+	if repo.insertArg == nil {
+		t.Fatalf("expected inserted block, got nil")
+	}
+
+	if repo.insertArg.Number != 100 {
+		t.Fatalf("expected inserted block number=100, got %d", repo.insertArg.Number)
+	}
+}
+
+func TestBlockService_SyncBlockToDB_ReturnsErrChainDiscontinuityWhenParentHashMismatch(t *testing.T) {
+	svc, repo, rpc := setupTestService(t)
+
+	rpcParentHash := common.HexToHash("0xaaa")
+	dbParentHash := common.HexToHash("0xbbb")
+	rpc.block = ethtypes.NewBlockWithHeader(&ethtypes.Header{
+		Number:     big.NewInt(100),
+		ParentHash: rpcParentHash,
+	})
+	repo.blocks = map[uint64]*models.Block{
+		99: {
+			Number: 99,
+			Hash:   dbParentHash.Hex(),
+		},
+	}
+
+	err := svc.SyncBlockToDB(context.Background(), 100)
+	if !errors.Is(err, types.ErrChainDiscontinuity) {
+		t.Fatalf("expected ErrChainDiscontinuity, got %v", err)
+	}
+
+	if repo.inserted {
+		t.Fatalf("expected InsertBlock not called")
 	}
 }
 

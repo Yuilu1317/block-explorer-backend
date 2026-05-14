@@ -8,8 +8,10 @@ var (
 	ErrInvalidAddress     = errors.New("invalid address")
 	ErrInvalidBlockRange  = errors.New("invalid block range")
 
-	ErrBlockNotFound = errors.New("block not found")
-	ErrTxNotFound    = errors.New("transaction not found")
+	ErrBlockNotFound      = errors.New("block not found")
+	ErrTxNotFound         = errors.New("transaction not found")
+	ErrReorgDetected      = errors.New("reorg detected")
+	ErrChainDiscontinuity = errors.New("chain discontinuity detected")
 
 	ErrBlockRangeTooLarge = errors.New("block range too large")
 

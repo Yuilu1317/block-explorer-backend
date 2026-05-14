@@ -8,7 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"strings"
 
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 )
@@ -46,7 +46,6 @@ func (s *BlockService) getRawBlockByNumber(ctx context.Context, number uint64) (
 func (s *BlockService) GetBlockByNumber(ctx context.Context, number uint64) (model.BlockQueryResult, error) {
 	dbBlock, found, err := s.blockRepo.GetBlockByNumber(ctx, number)
 	if err != nil {
-		log.Printf("[error] block query db failed: number=%d err=%v", number, err)
 		return model.BlockQueryResult{}, fmt.Errorf("get block %d from db: %w", number, err)
 	}
 	if found {
@@ -58,7 +57,6 @@ func (s *BlockService) GetBlockByNumber(ctx context.Context, number uint64) (mod
 		if errors.Is(err, types.ErrBlockNotFound) {
 			return model.BlockQueryResult{}, types.ErrBlockNotFound
 		}
-		log.Printf("[error] block query rpc failed: number=%d err=%v", number, err)
 		return model.BlockQueryResult{}, fmt.Errorf("get block detail by number %d: %w", number, err)
 	}
 	return mapper.MapRPCBlockToQueryResult(rpcBlock), nil
@@ -71,6 +69,41 @@ func (s *BlockService) SyncBlockToDB(ctx context.Context, number uint64) error {
 	}
 
 	blockModel := toBlockModel(block)
+
+	existingBlock, found, err := s.blockRepo.GetBlockByNumber(ctx, number)
+	if err != nil {
+		return fmt.Errorf("query block %d from db: %w", number, err)
+	}
+	if found {
+		if strings.EqualFold(existingBlock.Hash, blockModel.Hash) {
+			return nil
+		}
+		return fmt.Errorf(
+			"reorg detected at block %d: db_hash=%s rpc_hash=%s: %w",
+			number,
+			existingBlock.Hash,
+			blockModel.Hash,
+			types.ErrReorgDetected,
+		)
+	}
+
+	if number > 0 {
+		parentBlock, found, err := s.blockRepo.GetBlockByNumber(ctx, number-1)
+		if err != nil {
+			return fmt.Errorf("query parent block %d from db: %w", number-1, err)
+		}
+		if found {
+			if !strings.EqualFold(blockModel.ParentHash, parentBlock.Hash) {
+				return fmt.Errorf(
+					"chain discontinuity at block %d: rpc_parent_hash=%s db_parent_hash=%s: %w",
+					number,
+					blockModel.ParentHash,
+					parentBlock.Hash,
+					types.ErrChainDiscontinuity,
+				)
+			}
+		}
+	}
 
 	if err := s.blockRepo.InsertBlock(ctx, blockModel); err != nil {
 		return fmt.Errorf("insert block %d into db: %w", number, err)

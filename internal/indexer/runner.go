@@ -42,6 +42,10 @@ func (r *Runner) Start(ctx context.Context) {
 		result, err := r.indexer.RunIndexerOnce(runCtx)
 		cancel()
 
+		// Do not stop the runner on a single failure.
+		// The next loop will retry from the current DB latest block.
+		// Since DBLatest only advances after a successful insert,
+		// failed blocks will not be skipped.
 		if err != nil {
 			switch {
 			case errors.Is(err, types.ErrRequestCanceled):
