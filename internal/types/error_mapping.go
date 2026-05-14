@@ -63,6 +63,18 @@ func MapError(err error) (int, ErrorResponse) {
 			Message: "request canceled",
 		}
 
+	case errors.Is(err, ErrReorgDetected):
+		return http.StatusConflict, ErrorResponse{
+			Code:    http.StatusConflict,
+			Message: "reorg detected",
+		}
+
+	case errors.Is(err, ErrChainDiscontinuity):
+		return http.StatusConflict, ErrorResponse{
+			Code:    http.StatusConflict,
+			Message: "chain discontinuity detected",
+		}
+
 	default:
 		return http.StatusInternalServerError, ErrorResponse{
 			Code:    http.StatusInternalServerError,

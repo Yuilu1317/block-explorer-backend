@@ -503,3 +503,85 @@ func TestBlockService_SyncBlockRangeToDB_PartialFailure(t *testing.T) {
 		t.Fatalf("expected 2 inserted blocks, got %d", len(repo.insertedBlocks))
 	}
 }
+
+func TestBlockService_SyncBlockRangeToDB_ReturnsErrWhenReorgDetected(t *testing.T) {
+	svc, repo, rpc := setupTestService(t)
+	rpc.blocks = map[uint64]*ethtypes.Block{
+		100: ethtypes.NewBlockWithHeader(&ethtypes.Header{
+			Number: big.NewInt(100),
+		}),
+		101: ethtypes.NewBlockWithHeader(&ethtypes.Header{
+			Number: big.NewInt(101),
+		}),
+	}
+	repo.blocks = map[uint64]*models.Block{
+		100: {
+			Number: 100,
+			Hash:   common.HexToHash("0xbbbb").Hex(),
+		},
+	}
+	result, err := svc.SyncBlockRangeToDB(context.Background(), 100, 101)
+	if !errors.Is(err, types.ErrReorgDetected) {
+		t.Fatalf("expected ErrReorgDetected, got %v", err)
+	}
+
+	if result == nil {
+		t.Fatalf("expected result, got nil")
+	}
+
+	if result.Failed != 1 {
+		t.Fatalf("expected failed=1, got %d", result.Failed)
+	}
+
+	if len(result.FailedBlocks) != 1 || result.FailedBlocks[0] != 100 {
+		t.Fatalf("expected failed block 100, got %+v", result.FailedBlocks)
+	}
+
+	if repo.inserted {
+		t.Fatalf("expected InsertBlock not called")
+	}
+}
+
+func TestBlockService_SyncBlockRangeToDB_ReturnsErrWhenChainDiscontinuityDetected(t *testing.T) {
+	svc, repo, rpc := setupTestService(t)
+
+	rpcParentHash := common.HexToHash("0xaaa")
+	dbParentHash := common.HexToHash("0xbbb")
+
+	rpc.blocks = map[uint64]*ethtypes.Block{
+		100: ethtypes.NewBlockWithHeader(&ethtypes.Header{
+			Number:     big.NewInt(100),
+			ParentHash: rpcParentHash,
+		}),
+		101: ethtypes.NewBlockWithHeader(&ethtypes.Header{
+			Number: big.NewInt(101),
+		}),
+	}
+
+	repo.blocks = map[uint64]*models.Block{
+		99: {
+			Number: 99,
+			Hash:   dbParentHash.Hex(),
+		},
+	}
+	result, err := svc.SyncBlockRangeToDB(context.Background(), 100, 101)
+	if !errors.Is(err, types.ErrChainDiscontinuity) {
+		t.Fatalf("expected ErrChainDiscontinuity, got %v", err)
+	}
+
+	if result == nil {
+		t.Fatalf("expected result, got nil")
+	}
+
+	if result.Failed != 1 {
+		t.Fatalf("expected failed=1, got %d", result.Failed)
+	}
+
+	if len(result.FailedBlocks) != 1 || result.FailedBlocks[0] != 100 {
+		t.Fatalf("expected failed block 100, got %+v", result.FailedBlocks)
+	}
+
+	if repo.inserted {
+		t.Fatalf("expected InsertBlock not called")
+	}
+}

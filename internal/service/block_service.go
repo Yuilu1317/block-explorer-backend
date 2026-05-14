@@ -154,6 +154,9 @@ func (s *BlockService) SyncBlockRangeToDB(ctx context.Context, start, end uint64
 		if err != nil {
 			result.Failed++
 			result.FailedBlocks = append(result.FailedBlocks, number)
+			if errors.Is(err, types.ErrReorgDetected) || errors.Is(err, types.ErrChainDiscontinuity) {
+				return result, fmt.Errorf("sync block %d: %w", number, err)
+			}
 			continue
 		}
 		result.Succeeded++
