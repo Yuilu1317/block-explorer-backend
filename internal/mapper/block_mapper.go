@@ -52,3 +52,17 @@ func MapBlockQueryResultToDTO(r model.BlockQueryResult) types.BlockDetailDTO {
 		Miner:      r.Block.Miner,
 	}
 }
+
+func ToBlockModel(block *ethtypes.Block) *models.Block {
+
+	return &models.Block{
+		Number:     block.NumberU64(),
+		Hash:       block.Hash().Hex(),
+		ParentHash: block.ParentHash().Hex(),
+		Timestamp:  block.Time(),
+		Miner:      block.Coinbase().Hex(),
+		TxCount:    len(block.Transactions()),
+		GasUsed:    block.GasUsed(),
+		GasLimit:   block.GasLimit(),
+	}
+}

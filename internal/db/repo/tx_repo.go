@@ -19,6 +19,10 @@ func NewTransactionRepository(db *gorm.DB) *TransactionRepository {
 }
 
 func (r *TransactionRepository) InsertTransaction(ctx context.Context, tx *models.Transaction) error {
+	if tx == nil {
+		return fmt.Errorf("transaction is nil")
+	}
+
 	if err := r.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(tx).Error; err != nil {
 		if mapped := mapDBError(err); mapped != nil {
 			return mapped

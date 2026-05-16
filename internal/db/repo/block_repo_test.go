@@ -4,6 +4,8 @@ import (
 	"block-explorer-backend/internal/db/models"
 	"context"
 	"testing"
+
+	"gorm.io/gorm"
 )
 
 func TestBlockRepository_InsertBlock_Success(t *testing.T) {
@@ -190,5 +192,158 @@ func TestBlockRepository_GetBlockByNumber_Found(t *testing.T) {
 	}
 	if block.Hash != "0x123" {
 		t.Fatalf("expected hash=0x123, got %s", block.Hash)
+	}
+}
+
+func setupBlockWithTransactionsRepo(t *testing.T) (*BlockRepository, *gorm.DB) {
+	t.Helper()
+
+	db := SetupTestDB(t, &models.Block{}, &models.Transaction{})
+	return NewBlockRepository(db), db
+}
+
+func newBlockWithTxTestBlock(number uint64, hash string) *models.Block {
+	return &models.Block{
+		Number:     number,
+		Hash:       hash,
+		ParentHash: "0xparenthash",
+		Timestamp:  1700000000,
+		Miner:      "0x1111111111111111111111111111111111111111",
+		GasLimit:   30000000,
+		GasUsed:    21000,
+		TxCount:    3,
+	}
+}
+
+func newBlockWithTxTestTransaction(hash string, blockNumber uint64, blockHash string, txIndex uint) *models.Transaction {
+	return &models.Transaction{
+		Hash:        hash,
+		BlockNumber: blockNumber,
+		BlockHash:   blockHash,
+		TxIndex:     txIndex,
+		FromAddress: "0x1111111111111111111111111111111111111111",
+		ToAddress:   "0x2222222222222222222222222222222222222222",
+		Nonce:       uint64(txIndex),
+		ValueWei:    "1000000000000000000",
+		GasLimit:    21000,
+		GasPriceWei: "1000000000",
+		InputData:   "0x",
+	}
+}
+
+func TestBlockRepository_InsertBlockWithTransactions_Success(t *testing.T) {
+	r, db := setupBlockWithTransactionsRepo(t)
+	ctx := context.Background()
+
+	block := newBlockWithTxTestBlock(100, "0xblockhash100")
+	txs := []*models.Transaction{
+		newBlockWithTxTestTransaction("0xtxhash1", 100, "0xblockhash100", 0),
+		newBlockWithTxTestTransaction("0xtxhash2", 100, "0xblockhash100", 1),
+		newBlockWithTxTestTransaction("0xtxhash3", 100, "0xblockhash100", 2),
+	}
+	if err := r.InsertBlockWithTransactions(ctx, block, txs); err != nil {
+		t.Fatalf("insert block with transactions: %v", err)
+	}
+	var blockCount int64
+	if err := db.Model(&models.Block{}).Where("number = ?", 100).Count(&blockCount).Error; err != nil {
+		t.Fatalf("count blocks: %v", err)
+	}
+	if blockCount != 1 {
+		t.Fatalf("expected 1 block, got %d", blockCount)
+	}
+
+	var txCount int64
+	if err := db.Model(&models.Transaction{}).Where("block_number = ?", 100).Count(&txCount).Error; err != nil {
+		t.Fatalf("count transactions: %v", err)
+	}
+	if txCount != 3 {
+		t.Fatalf("expected 3 transactions, got %d", txCount)
+	}
+}
+
+func TestBlockRepository_InsertBlockWithTransactions_EmptyTransactions(t *testing.T) {
+	r, db := setupBlockWithTransactionsRepo(t)
+	ctx := context.Background()
+
+	block := newBlockWithTxTestBlock(100, "0xblockhash100")
+
+	if err := r.InsertBlockWithTransactions(ctx, block, nil); err != nil {
+		t.Fatalf("insert block with empty transactions: %v", err)
+	}
+
+	var blockCount int64
+	if err := db.Model(&models.Block{}).Where("number = ?", 100).Count(&blockCount).Error; err != nil {
+		t.Fatalf("count blocks: %v", err)
+	}
+	if blockCount != 1 {
+		t.Fatalf("expected 1 block, got %d", blockCount)
+	}
+
+	var txCount int64
+	if err := db.Model(&models.Transaction{}).Where("block_number = ?", 100).Count(&txCount).Error; err != nil {
+		t.Fatalf("count transactions: %v", err)
+	}
+	if txCount != 0 {
+		t.Fatalf("expected 0 transactions, got %d", txCount)
+	}
+}
+
+func TestBlockRepository_InsertBlockWithTransactions_DuplicateIgnored(t *testing.T) {
+	r, db := setupBlockWithTransactionsRepo(t)
+	ctx := context.Background()
+
+	block := newBlockWithTxTestBlock(100, "0xblockhash100")
+	txs := []*models.Transaction{
+		newBlockWithTxTestTransaction("0xtxhash1", 100, "0xblockhash100", 0),
+		newBlockWithTxTestTransaction("0xtxhash2", 100, "0xblockhash100", 1),
+		newBlockWithTxTestTransaction("0xtxhash3", 100, "0xblockhash100", 2),
+	}
+
+	if err := r.InsertBlockWithTransactions(ctx, block, txs); err != nil {
+		t.Fatalf("first insert block with transactions: %v", err)
+	}
+
+	if err := r.InsertBlockWithTransactions(ctx, block, txs); err != nil {
+		t.Fatalf("second insert block with transactions: %v", err)
+	}
+
+	var blockCount int64
+	if err := db.Model(&models.Block{}).Where("number = ?", 100).Count(&blockCount).Error; err != nil {
+		t.Fatalf("count blocks: %v", err)
+	}
+	if blockCount != 1 {
+		t.Fatalf("expected 1 block, got %d", blockCount)
+	}
+
+	var txCount int64
+	if err := db.Model(&models.Transaction{}).Where("block_number = ?", 100).Count(&txCount).Error; err != nil {
+		t.Fatalf("count transactions: %v", err)
+	}
+	if txCount != 3 {
+		t.Fatalf("expected 3 transactions, got %d", txCount)
+	}
+}
+
+func TestBlockRepository_InsertBlockWithTransactions_DBError(t *testing.T) {
+	r, db := setupBlockWithTransactionsRepo(t)
+	ctx := context.Background()
+
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("get sql db: %v", err)
+	}
+
+	if err := sqlDB.Close(); err != nil {
+		t.Fatalf("close db: %v", err)
+	}
+
+	block := newBlockWithTxTestBlock(100, "0xblockhash100")
+	txs := []*models.Transaction{
+		newBlockWithTxTestTransaction("0xtxhash1", 100, "0xblockhash100", 0),
+	}
+
+	err = r.InsertBlockWithTransactions(ctx, block, txs)
+	if err == nil {
+		t.Fatalf("expected error, got nil")
 	}
 }

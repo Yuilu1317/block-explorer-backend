@@ -68,7 +68,7 @@ func (s *BlockService) SyncBlockToDB(ctx context.Context, number uint64) error {
 		return fmt.Errorf("fetch block %d from rpc: %w", number, err)
 	}
 
-	blockModel := toBlockModel(block)
+	blockModel := mapper.ToBlockModel(block)
 
 	existingBlock, found, err := s.blockRepo.GetBlockByNumber(ctx, number)
 	if err != nil {
@@ -109,20 +109,6 @@ func (s *BlockService) SyncBlockToDB(ctx context.Context, number uint64) error {
 		return fmt.Errorf("insert block %d into db: %w", number, err)
 	}
 	return nil
-}
-
-func toBlockModel(block *ethtypes.Block) *models.Block {
-
-	return &models.Block{
-		Number:     block.NumberU64(),
-		Hash:       block.Hash().Hex(),
-		ParentHash: block.ParentHash().Hex(),
-		Timestamp:  block.Time(),
-		Miner:      block.Coinbase().Hex(),
-		TxCount:    len(block.Transactions()),
-		GasUsed:    block.GasUsed(),
-		GasLimit:   block.GasLimit(),
-	}
 }
 
 // SyncBlockRangetoDB handles manual block sync for debugging or recovery.

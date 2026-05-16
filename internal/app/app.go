@@ -31,7 +31,7 @@ func Run() error {
 		return err
 	}
 	if err := database.AutoMigrate(&models.Block{}, &models.Transaction{}); err != nil {
-		return fmt.Errorf("auto migrate database table failed: %w", err)
+		return fmt.Errorf("auto migrate database tables failed: %w", err)
 	}
 	log.Println("database migrated")
 

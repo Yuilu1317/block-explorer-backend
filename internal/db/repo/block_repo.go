@@ -63,3 +63,26 @@ func (r *BlockRepository) GetBlockByNumber(ctx context.Context, number uint64) (
 
 	return &block, true, nil
 }
+
+func (r *BlockRepository) InsertBlockWithTransactions(ctx context.Context, block *models.Block, txs []*models.Transaction) error {
+	return r.db.WithContext(ctx).Transaction(func(txDB *gorm.DB) error {
+		if err := txDB.Clauses(clause.OnConflict{DoNothing: true}).Create(block).Error; err != nil {
+			if mapped := mapDBError(err); mapped != nil {
+				return mapped
+			}
+			return fmt.Errorf("insert block %d: %w", block.Number, err)
+		}
+		if len(txs) == 0 {
+			return nil
+		}
+
+		if err := txDB.Clauses(clause.OnConflict{DoNothing: true}).Create(&txs).Error; err != nil {
+			if mapped := mapDBError(err); mapped != nil {
+				return mapped
+			}
+			return fmt.Errorf("insert transactions for block %d: %w", block.Number, err)
+		}
+
+		return nil
+	})
+}
