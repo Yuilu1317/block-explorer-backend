@@ -8,19 +8,22 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/big"
 	"strings"
 
+	"github.com/ethereum/go-ethereum/common"
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 )
 
 type BlockRPC interface {
 	GetBlockByNumber(ctx context.Context, number uint64) (*ethtypes.Block, error)
+	GetChainID(ctx context.Context) (*big.Int, error)
 }
 
 // BlockRepository call interface
 type BlockRepository interface {
-	InsertBlock(ctx context.Context, block *models.Block) error
 	GetBlockByNumber(ctx context.Context, number uint64) (*models.Block, bool, error)
+	InsertBlockWithTransactions(ctx context.Context, block *models.Block, txs []*models.Transaction) error
 }
 
 type BlockService struct {
@@ -62,6 +65,77 @@ func (s *BlockService) GetBlockByNumber(ctx context.Context, number uint64) (mod
 	return mapper.MapRPCBlockToQueryResult(rpcBlock), nil
 }
 
+func (s *BlockService) validateBlockForSync(ctx context.Context, blockModel *models.Block) error {
+	existingBlock, found, err := s.blockRepo.GetBlockByNumber(ctx, blockModel.Number)
+	if err != nil {
+		return fmt.Errorf("query block %d from db: %w", blockModel.Number, err)
+	}
+	if found {
+		if strings.EqualFold(existingBlock.Hash, blockModel.Hash) {
+			return nil
+		}
+		return fmt.Errorf(
+			"reorg detected at block %d: db_hash=%s rpc_hash=%s: %w",
+			blockModel.Number,
+			existingBlock.Hash,
+			blockModel.Hash,
+			types.ErrReorgDetected,
+		)
+	}
+
+	if blockModel.Number > 0 {
+		parentBlock, found, err := s.blockRepo.GetBlockByNumber(ctx, blockModel.Number-1)
+		if err != nil {
+			return fmt.Errorf("query parent block %d from db: %w", blockModel.Number-1, err)
+		}
+		if found && !strings.EqualFold(blockModel.ParentHash, parentBlock.Hash) {
+			return fmt.Errorf(
+				"chain discontinuity at block %d: rpc_parent_hash=%s db_parent_hash=%s: %w",
+				blockModel.Number,
+				blockModel.ParentHash,
+				parentBlock.Hash,
+				types.ErrChainDiscontinuity,
+			)
+		}
+	}
+	return nil
+}
+
+func (s *BlockService) recoverTransactionSender(signer ethtypes.Signer, ethTx *ethtypes.Transaction) (common.Address, error) {
+	from, err := ethtypes.Sender(signer, ethTx)
+	if err != nil {
+		return common.Address{}, err
+	}
+
+	return from, nil
+}
+
+func (s *BlockService) buildTransactionModelsFromBlock(ctx context.Context, block *ethtypes.Block) ([]*models.Transaction, error) {
+	ethTxs := block.Transactions()
+	if len(ethTxs) == 0 {
+		return []*models.Transaction{}, nil
+	}
+
+	chainID, err := s.blockRPC.
+		GetChainID(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get chain id: %w", err)
+	}
+
+	txModels := make([]*models.Transaction, 0, len(ethTxs))
+	signer := ethtypes.LatestSignerForChainID(chainID)
+
+	for i, ethTx := range ethTxs {
+		from, err := s.recoverTransactionSender(signer, ethTx)
+		if err != nil {
+			return nil, fmt.Errorf("recover sender for tx %s: %w", ethTx.Hash().Hex(), err)
+		}
+		txModel := mapper.ToTransactionModel(block, ethTx, uint(i), from)
+		txModels = append(txModels, txModel)
+	}
+	return txModels, nil
+}
+
 func (s *BlockService) SyncBlockToDB(ctx context.Context, number uint64) error {
 	block, err := s.getRawBlockByNumber(ctx, number)
 	if err != nil {
@@ -70,42 +144,16 @@ func (s *BlockService) SyncBlockToDB(ctx context.Context, number uint64) error {
 
 	blockModel := mapper.ToBlockModel(block)
 
-	existingBlock, found, err := s.blockRepo.GetBlockByNumber(ctx, number)
+	if err := s.validateBlockForSync(ctx, blockModel); err != nil {
+		return err
+	}
+
+	txModels, err := s.buildTransactionModelsFromBlock(ctx, block)
 	if err != nil {
-		return fmt.Errorf("query block %d from db: %w", number, err)
-	}
-	if found {
-		if strings.EqualFold(existingBlock.Hash, blockModel.Hash) {
-			return nil
-		}
-		return fmt.Errorf(
-			"reorg detected at block %d: db_hash=%s rpc_hash=%s: %w",
-			number,
-			existingBlock.Hash,
-			blockModel.Hash,
-			types.ErrReorgDetected,
-		)
+		return err
 	}
 
-	if number > 0 {
-		parentBlock, found, err := s.blockRepo.GetBlockByNumber(ctx, number-1)
-		if err != nil {
-			return fmt.Errorf("query parent block %d from db: %w", number-1, err)
-		}
-		if found {
-			if !strings.EqualFold(blockModel.ParentHash, parentBlock.Hash) {
-				return fmt.Errorf(
-					"chain discontinuity at block %d: rpc_parent_hash=%s db_parent_hash=%s: %w",
-					number,
-					blockModel.ParentHash,
-					parentBlock.Hash,
-					types.ErrChainDiscontinuity,
-				)
-			}
-		}
-	}
-
-	if err := s.blockRepo.InsertBlock(ctx, blockModel); err != nil {
+	if err := s.blockRepo.InsertBlockWithTransactions(ctx, blockModel, txModels); err != nil {
 		return fmt.Errorf("insert block %d into db: %w", number, err)
 	}
 	return nil

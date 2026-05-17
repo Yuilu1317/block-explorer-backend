@@ -103,3 +103,11 @@ func (r *BlockRPC) GetBlockNumberByTag(ctx context.Context, tag string) (uint64,
 
 	return number, nil
 }
+
+func (r *BlockRPC) GetChainID(ctx context.Context) (*big.Int, error) {
+	chainID, err := r.client.ChainID(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get chain id: %w", err)
+	}
+	return chainID, nil
+}
