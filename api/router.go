@@ -34,8 +34,9 @@ func NewRouter(
 
 	txGroup := r.Group("/tx")
 	{
-		txGroup.GET("/:hash", txController.GetTx)
+		txGroup.GET("/:hash", txController.GetTxDetailByHashFromRPC)
 	}
+	r.GET("/indexed/tx/:hash", txController.GetIndexedTransactionByHash)
 
 	blockGroup := r.Group("/block")
 	{

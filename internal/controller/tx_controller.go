@@ -11,7 +11,8 @@ import (
 // The controller depends on this interface instead of a concrete implementation,
 // which enables loose coupling and easier testing.
 type TxService interface {
-	GetTxByHash(ctx context.Context, hash string) (*types.TxDetailDTO, error)
+	GetTxDetailByHashFromRPC(ctx context.Context, hash string) (*types.TxDetailDTO, error)
+	GetIndexedTransactionByHash(ctx context.Context, hash string) (*types.IndexedTransactionDTO, error)
 }
 
 // TxController handles HTTP requests related to transactions.
@@ -28,10 +29,10 @@ func NewTxController(txService TxService) *TxController {
 	}
 }
 
-// GetTx handles the HTTP request for querying a transaction by hash.
+// GetTxDetailByHashFromRPC handles the HTTP request for querying a transaction by hash.
 // It extracts the hash from the URL, calls the service layer,
 // and returns a JSON response.
-func (ctl *TxController) GetTx(c *gin.Context) {
+func (ctl *TxController) GetTxDetailByHashFromRPC(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	// Extract the transaction hash from URL path parameter (e.g. /tx/:hash)
@@ -42,7 +43,7 @@ func (ctl *TxController) GetTx(c *gin.Context) {
 	}
 
 	// Delegate the business logic to the service layer
-	tx, err := ctl.txService.GetTxByHash(ctx, hash)
+	tx, err := ctl.txService.GetTxDetailByHashFromRPC(ctx, hash)
 	// Handle errors and map them to appropriate HTTP status codes
 
 	if err != nil {
@@ -51,5 +52,23 @@ func (ctl *TxController) GetTx(c *gin.Context) {
 	}
 
 	// Return successful response with transaction data
+	types.WriteSuccess(c, tx)
+}
+
+func (ctl *TxController) GetIndexedTransactionByHash(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	hash := c.Param("hash")
+	if hash == "" {
+		types.WriteBadRequest(c, "transaction hash is required")
+		return
+	}
+
+	tx, err := ctl.txService.GetIndexedTransactionByHash(ctx, hash)
+	if err != nil {
+		types.WriteError(c, err)
+		return
+	}
+
 	types.WriteSuccess(c, tx)
 }

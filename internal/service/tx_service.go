@@ -1,9 +1,10 @@
 package service
 
 import (
+	"block-explorer-backend/internal/db/models"
+	"block-explorer-backend/internal/mapper"
 	"context"
 	"fmt"
-	"math/big"
 	"strings"
 
 	"block-explorer-backend/internal/types"
@@ -14,19 +15,26 @@ type TxRPC interface {
 	GetTransactionByHash(ctx context.Context, hash string) (*types.TxRaw, error)
 }
 
-type TxService struct {
-	// txRPC is the RPC dependency used to fetch transaction data from the blockchain
-	txRPC TxRPC
+type TxRepo interface {
+	GetTransactionByHash(ctx context.Context, hash string) (*models.Transaction, bool, error)
 }
 
-func NewTxService(txRPC TxRPC) *TxService {
+type TxService struct {
+	// txRPC is the RPC dependency used to fetch transaction data from the blockchain
+	txRPC  TxRPC
+	txRepo TxRepo
+}
+
+func NewTxService(txRPC TxRPC, txRepo TxRepo) *TxService {
 	return &TxService{
-		txRPC: txRPC,
+		txRPC:  txRPC,
+		txRepo: txRepo,
 	}
 }
 
-func (s *TxService) GetTxByHash(ctx context.Context, hash string) (*types.TxDetailDTO, error) {
+func (s *TxService) GetTxDetailByHashFromRPC(ctx context.Context, hash string) (*types.TxDetailDTO, error) {
 	hash = strings.TrimSpace(hash)
+	hash = strings.ToLower(hash)
 
 	if err := utils.ValidateTxHash(hash); err != nil {
 		return nil, types.ErrInvalidTxHash
@@ -37,53 +45,25 @@ func (s *TxService) GetTxByHash(ctx context.Context, hash string) (*types.TxDeta
 		return nil, fmt.Errorf("get transaction by hash %s: %w", hash, err)
 	}
 
-	return s.toTxDetailDTO(raw), nil
+	return mapper.ToTxDetailDTO(raw), nil
 }
 
-func (s *TxService) toTxDetailDTO(raw *types.TxRaw) *types.TxDetailDTO {
-	tx := raw.Tx
+func (s *TxService) GetIndexedTransactionByHash(ctx context.Context, hash string) (*types.IndexedTransactionDTO, error) {
+	hash = strings.TrimSpace(hash)
+	hash = strings.ToLower(hash)
 
-	to := ""
-	if tx.To() != nil {
-		to = tx.To().Hex()
+	if err := utils.ValidateTxHash(hash); err != nil {
+		return nil, types.ErrInvalidTxHash
 	}
 
-	gasPriceWei := tx.GasPrice()
-	if gasPriceWei == nil {
-		gasPriceWei = big.NewInt(0)
+	tx, found, err := s.txRepo.GetTransactionByHash(ctx, hash)
+	if err != nil {
+		return nil, fmt.Errorf("get indexed transaction by hash %s from db: %w", hash, err)
 	}
 
-	var (
-		status      *uint64
-		gasUsed     *uint64
-		blockNumber *uint64
-	)
-
-	if raw.Receipt != nil {
-		receiptStatus := raw.Receipt.Status
-		status = &receiptStatus
-
-		used := raw.Receipt.GasUsed
-		gasUsed = &used
-
-		if raw.Receipt.BlockNumber != nil {
-			bn := raw.Receipt.BlockNumber.Uint64()
-			blockNumber = &bn
-		}
+	if !found {
+		return nil, types.ErrTxNotFound
 	}
 
-	return &types.TxDetailDTO{
-		Hash:        tx.Hash().Hex(),
-		From:        raw.From,
-		To:          to,
-		ValueWei:    tx.Value().String(),
-		Nonce:       tx.Nonce(),
-		GasLimit:    tx.Gas(),
-		GasPriceWei: gasPriceWei.String(),
-		Data:        fmt.Sprintf("0x%x", tx.Data()),
-		IsPending:   raw.IsPending,
-		BlockNumber: blockNumber,
-		Status:      status,
-		GasUsed:     gasUsed,
-	}
+	return mapper.ToIndexedTransactionDTO(tx), nil
 }

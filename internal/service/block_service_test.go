@@ -14,7 +14,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 )
 
-type fakeRPC struct {
+type fakeBlockRPC struct {
 	block *ethtypes.Block
 	err   error
 
@@ -28,7 +28,7 @@ type fakeRPC struct {
 	getChainIDCalled bool
 }
 
-func (f *fakeRPC) GetBlockByNumber(ctx context.Context, number uint64) (*ethtypes.Block, error) {
+func (f *fakeBlockRPC) GetBlockByNumber(ctx context.Context, number uint64) (*ethtypes.Block, error) {
 	if f.onGetBlock != nil {
 		f.onGetBlock(number)
 	}
@@ -49,7 +49,7 @@ func (f *fakeRPC) GetBlockByNumber(ctx context.Context, number uint64) (*ethtype
 	return f.block, nil
 }
 
-func (f *fakeRPC) GetChainID(ctx context.Context) (*big.Int, error) {
+func (f *fakeBlockRPC) GetChainID(ctx context.Context) (*big.Int, error) {
 	f.getChainIDCalled = true
 	if f.chainIDErr != nil {
 		return nil, f.chainIDErr
@@ -114,10 +114,10 @@ func (f *fakeBlockRepo) GetBlockByNumber(ctx context.Context, number uint64) (*m
 	return nil, false, nil
 }
 
-func setupTestService(t *testing.T) (*BlockService, *fakeBlockRepo, *fakeRPC) {
+func setupTestService(t *testing.T) (*BlockService, *fakeBlockRepo, *fakeBlockRPC) {
 	t.Helper()
 
-	rpc := &fakeRPC{}
+	rpc := &fakeBlockRPC{}
 	r := &fakeBlockRepo{}
 
 	svc := NewBlockService(rpc, r)

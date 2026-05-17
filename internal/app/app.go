@@ -46,7 +46,8 @@ func Run() error {
 	}
 
 	txRPC := rpc.NewTxRPC(ethClient, rpcClient, cfg.Rpc.TimeoutSeconds)
-	txService := service.NewTxService(txRPC)
+	txRepo := repo.NewTransactionRepository(database)
+	txService := service.NewTxService(txRPC, txRepo)
 	txController := controller.NewTxController(txService)
 
 	blockRPC := rpc.NewBlockRPC(ethClient, rpcClient, cfg.Rpc.TimeoutSeconds)

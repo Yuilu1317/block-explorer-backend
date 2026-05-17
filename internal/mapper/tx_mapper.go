@@ -2,6 +2,9 @@ package mapper
 
 import (
 	"block-explorer-backend/internal/db/models"
+	"block-explorer-backend/internal/types"
+	"fmt"
+	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
@@ -24,5 +27,79 @@ func ToTransactionModel(block *ethtypes.Block, tx *ethtypes.Transaction, txIndex
 		GasLimit:    tx.Gas(),
 		GasPriceWei: tx.GasPrice().String(),
 		InputData:   "0x" + common.Bytes2Hex(tx.Data()),
+	}
+}
+
+func ToTxDetailDTO(raw *types.TxRaw) *types.TxDetailDTO {
+	if raw == nil || raw.Tx == nil {
+		return nil
+	}
+
+	tx := raw.Tx
+
+	to := ""
+	if tx.To() != nil {
+		to = tx.To().Hex()
+	}
+
+	gasPriceWei := tx.GasPrice()
+	if gasPriceWei == nil {
+		gasPriceWei = big.NewInt(0)
+	}
+
+	var (
+		status      *uint64
+		gasUsed     *uint64
+		blockNumber *uint64
+	)
+
+	if raw.Receipt != nil {
+		receiptStatus := raw.Receipt.Status
+		status = &receiptStatus
+
+		used := raw.Receipt.GasUsed
+		gasUsed = &used
+
+		if raw.Receipt.BlockNumber != nil {
+			bn := raw.Receipt.BlockNumber.Uint64()
+			blockNumber = &bn
+		}
+	}
+
+	return &types.TxDetailDTO{
+		Hash:        tx.Hash().Hex(),
+		FromAddress: raw.From,
+		ToAddress:   to,
+		ValueWei:    tx.Value().String(),
+		Nonce:       tx.Nonce(),
+		GasLimit:    tx.Gas(),
+		GasPriceWei: gasPriceWei.String(),
+		Data:        fmt.Sprintf("0x%x", tx.Data()),
+		IsPending:   raw.IsPending,
+		BlockNumber: blockNumber,
+		Status:      status,
+		GasUsed:     gasUsed,
+	}
+}
+
+func ToIndexedTransactionDTO(tx *models.Transaction) *types.IndexedTransactionDTO {
+	if tx == nil {
+		return nil
+	}
+
+	return &types.IndexedTransactionDTO{
+		Hash:        tx.Hash,
+		BlockNumber: tx.BlockNumber,
+		BlockHash:   tx.BlockHash,
+		TxIndex:     tx.TxIndex,
+
+		FromAddress: tx.FromAddress,
+		ToAddress:   tx.ToAddress,
+
+		Nonce:       tx.Nonce,
+		ValueWei:    tx.ValueWei,
+		GasLimit:    tx.GasLimit,
+		GasPriceWei: tx.GasPriceWei,
+		InputData:   tx.InputData,
 	}
 }
