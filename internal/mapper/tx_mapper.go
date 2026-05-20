@@ -5,23 +5,34 @@ import (
 	"block-explorer-backend/internal/types"
 	"fmt"
 	"math/big"
+	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 )
 
 func ToTransactionModel(block *ethtypes.Block, tx *ethtypes.Transaction, txIndex uint, from common.Address) *models.Transaction {
-	to := ""
+	fromAddress := from.Hex()
+	fromAddressLower := strings.ToLower(fromAddress)
+
+	toAddress := ""
+	toAddressLower := ""
 	if tx.To() != nil {
-		to = tx.To().Hex()
+		toAddress = tx.To().Hex()
+		toAddressLower = strings.ToLower(toAddress)
 	}
+
 	return &models.Transaction{
 		Hash:        tx.Hash().Hex(),
 		BlockNumber: block.NumberU64(),
 		BlockHash:   block.Hash().Hex(),
 		TxIndex:     txIndex,
-		FromAddress: from.Hex(),
-		ToAddress:   to,
+
+		FromAddress:      fromAddress,
+		FromAddressLower: fromAddressLower,
+		ToAddress:        toAddress,
+		ToAddressLower:   toAddressLower,
+
 		Nonce:       tx.Nonce(),
 		ValueWei:    tx.Value().String(),
 		GasLimit:    tx.Gas(),
@@ -95,6 +106,49 @@ func ToIndexedTransactionDTO(tx *models.Transaction) *types.IndexedTransactionDT
 
 		FromAddress: tx.FromAddress,
 		ToAddress:   tx.ToAddress,
+
+		Nonce:       tx.Nonce,
+		ValueWei:    tx.ValueWei,
+		GasLimit:    tx.GasLimit,
+		GasPriceWei: tx.GasPriceWei,
+		InputData:   tx.InputData,
+	}
+}
+
+func ToAddressTransactionDTO(
+	tx *models.Transaction,
+	queryAddress string,
+) *types.AddressTransactionDTO {
+	if tx == nil {
+		return nil
+	}
+
+	direction := "unknown"
+	counterparty := ""
+
+	switch {
+	case tx.FromAddressLower == queryAddress && tx.ToAddressLower == queryAddress:
+		direction = "self"
+		counterparty = tx.ToAddress
+	case tx.FromAddressLower == queryAddress:
+		direction = "out"
+		counterparty = tx.ToAddress
+	case tx.ToAddressLower == queryAddress:
+		direction = "in"
+		counterparty = tx.FromAddress
+	}
+	
+	return &types.AddressTransactionDTO{
+		Hash:        tx.Hash,
+		BlockNumber: tx.BlockNumber,
+		BlockHash:   tx.BlockHash,
+		TxIndex:     tx.TxIndex,
+
+		FromAddress: tx.FromAddress,
+		ToAddress:   tx.ToAddress,
+
+		Direction:           direction,
+		CounterpartyAddress: counterparty,
 
 		Nonce:       tx.Nonce,
 		ValueWei:    tx.ValueWei,

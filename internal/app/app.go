@@ -56,7 +56,7 @@ func Run() error {
 	blockController := controller.NewBlockController(blockService)
 
 	addressRPC := rpc.NewAddressRPC(ethClient, rpcClient, cfg.Rpc.TimeoutSeconds)
-	addressService := service.NewAddressService(addressRPC)
+	addressService := service.NewAddressService(addressRPC, txRepo)
 	addressController := controller.NewAddressController(addressService)
 
 	debugController := controller.NewDebugController(sqlDB)

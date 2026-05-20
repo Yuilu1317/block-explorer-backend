@@ -5,13 +5,13 @@ import (
 	"block-explorer-backend/internal/mapper"
 	"block-explorer-backend/internal/service/model"
 	"block-explorer-backend/internal/types"
+	"block-explorer-backend/internal/utils/ethutils"
 	"context"
 	"errors"
 	"fmt"
 	"math/big"
 	"strings"
 
-	"github.com/ethereum/go-ethereum/common"
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 )
 
@@ -101,15 +101,6 @@ func (s *BlockService) validateBlockForSync(ctx context.Context, blockModel *mod
 	return nil
 }
 
-func (s *BlockService) recoverTransactionSender(signer ethtypes.Signer, ethTx *ethtypes.Transaction) (common.Address, error) {
-	from, err := ethtypes.Sender(signer, ethTx)
-	if err != nil {
-		return common.Address{}, err
-	}
-
-	return from, nil
-}
-
 func (s *BlockService) buildTransactionModelsFromBlock(ctx context.Context, block *ethtypes.Block) ([]*models.Transaction, error) {
 	ethTxs := block.Transactions()
 	if len(ethTxs) == 0 {
@@ -126,7 +117,7 @@ func (s *BlockService) buildTransactionModelsFromBlock(ctx context.Context, bloc
 	signer := ethtypes.LatestSignerForChainID(chainID)
 
 	for i, ethTx := range ethTxs {
-		from, err := s.recoverTransactionSender(signer, ethTx)
+		from, err := ethutils.RecoverSender(signer, ethTx)
 		if err != nil {
 			return nil, fmt.Errorf("recover sender for tx %s: %w", ethTx.Hash().Hex(), err)
 		}

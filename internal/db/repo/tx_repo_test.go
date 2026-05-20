@@ -3,6 +3,7 @@ package repo
 import (
 	"block-explorer-backend/internal/db/models"
 	"context"
+	"strings"
 	"testing"
 
 	"gorm.io/gorm"
@@ -16,13 +17,20 @@ func setupTransactionRepo(t *testing.T) (*TransactionRepository, *gorm.DB) {
 }
 
 func newTestTransaction(hash string, blockNumber uint64, txIndex uint) *models.Transaction {
+	from := "0x1111111111111111111111111111111111111111"
+	to := "0x2222222222222222222222222222222222222222"
+
 	return &models.Transaction{
 		Hash:        hash,
 		BlockNumber: blockNumber,
 		BlockHash:   "0xblockhash",
 		TxIndex:     txIndex,
-		FromAddress: "0x1111111111111111111111111111111111111111",
-		ToAddress:   "0x2222222222222222222222222222222222222222",
+
+		FromAddress:      from,
+		FromAddressLower: strings.ToLower(from),
+		ToAddress:        to,
+		ToAddressLower:   strings.ToLower(to),
+
 		Nonce:       uint64(txIndex),
 		ValueWei:    "1000000000000000000",
 		GasLimit:    21000,
@@ -59,6 +67,13 @@ func TestTransactionRepository_InsertTransaction_Success(t *testing.T) {
 	}
 	if got.ToAddress != tx.ToAddress {
 		t.Fatalf("expected to address=%s, got %s", tx.ToAddress, got.ToAddress)
+	}
+	if got.FromAddressLower != tx.FromAddressLower {
+		t.Fatalf("expected from address lower=%s, got %s", tx.FromAddressLower, got.FromAddressLower)
+	}
+
+	if got.ToAddressLower != tx.ToAddressLower {
+		t.Fatalf("expected to address lower=%s, got %s", tx.ToAddressLower, got.ToAddressLower)
 	}
 }
 
@@ -249,5 +264,213 @@ func TestTransactionRepository_GetTransactionByHash_DBError(t *testing.T) {
 
 	if tx != nil {
 		t.Fatalf("expected tx=nil, got %+v", tx)
+	}
+}
+
+func TestTransactionRepository_ListTransactionsByAddress_ReturnsTxsWhenFromAddressMatches(t *testing.T) {
+	r, db := setupTransactionRepo(t)
+	ctx := context.Background()
+
+	tx1 := newTestTransaction("0xtxhash1", 100, 0)
+
+	tx2 := newTestTransaction("0xtxhash2", 101, 0)
+	tx2.FromAddress = "0x3333333333333333333333333333333333333333"
+	tx2.FromAddressLower = strings.ToLower(tx2.FromAddress)
+	tx2.ToAddress = "0x4444444444444444444444444444444444444444"
+	tx2.ToAddressLower = strings.ToLower(tx2.ToAddress)
+
+	if err := db.Create(tx1).Error; err != nil {
+		t.Fatalf("seed tx1: %v", err)
+	}
+	if err := db.Create(tx2).Error; err != nil {
+		t.Fatalf("seed tx2: %v", err)
+	}
+
+	got, err := r.ListTransactionsByAddress(ctx, tx1.FromAddressLower, 10, 0)
+	if err != nil {
+		t.Fatalf("list transactions by address: %v", err)
+	}
+
+	if len(got) != 1 {
+		t.Fatalf("expected 1 transaction, got %d", len(got))
+	}
+
+	if got[0].Hash != "0xtxhash1" {
+		t.Fatalf("expected hash=0xtxhash1, got %s", got[0].Hash)
+	}
+}
+
+func TestTransactionRepository_ListTransactionsByAddress_ReturnsTxsWhenToAddressMatches(t *testing.T) {
+	r, db := setupTransactionRepo(t)
+	ctx := context.Background()
+
+	tx1 := newTestTransaction("0xtxhash1", 100, 0)
+
+	tx2 := newTestTransaction("0xtxhash2", 101, 0)
+	tx2.FromAddress = "0x3333333333333333333333333333333333333333"
+	tx2.FromAddressLower = strings.ToLower(tx2.FromAddress)
+	tx2.ToAddress = "0x4444444444444444444444444444444444444444"
+	tx2.ToAddressLower = strings.ToLower(tx2.ToAddress)
+
+	if err := db.Create(tx1).Error; err != nil {
+		t.Fatalf("seed tx1: %v", err)
+	}
+	if err := db.Create(tx2).Error; err != nil {
+		t.Fatalf("seed tx2: %v", err)
+	}
+
+	got, err := r.ListTransactionsByAddress(ctx, tx1.ToAddressLower, 10, 0)
+	if err != nil {
+		t.Fatalf("list transactions by address: %v", err)
+	}
+
+	if len(got) != 1 {
+		t.Fatalf("expected 1 transaction, got %d", len(got))
+	}
+
+	if got[0].Hash != "0xtxhash1" {
+		t.Fatalf("expected hash=0xtxhash1, got %s", got[0].Hash)
+	}
+}
+
+func TestTransactionRepository_ListTransactionsByAddress_MatchesLowercaseAddressKey(t *testing.T) {
+	r, db := setupTransactionRepo(t)
+	ctx := context.Background()
+
+	checksumAddress := "0x39fA8c5f2793459D6622857E7D9FbB4BD91766d3"
+	lowerAddress := strings.ToLower(checksumAddress)
+
+	tx := newTestTransaction("0xtxhash1", 100, 0)
+	tx.FromAddress = checksumAddress
+	tx.FromAddressLower = lowerAddress
+
+	if err := db.Create(tx).Error; err != nil {
+		t.Fatalf("seed transaction: %v", err)
+	}
+
+	got, err := r.ListTransactionsByAddress(ctx, lowerAddress, 10, 0)
+	if err != nil {
+		t.Fatalf("list transactions by address: %v", err)
+	}
+
+	if len(got) != 1 {
+		t.Fatalf("expected 1 transaction, got %d", len(got))
+	}
+
+	if got[0].Hash != "0xtxhash1" {
+		t.Fatalf("expected hash=0xtxhash1, got %s", got[0].Hash)
+	}
+
+	if got[0].FromAddress != checksumAddress {
+		t.Fatalf("expected display address=%s, got %s", checksumAddress, got[0].FromAddress)
+	}
+
+	if got[0].FromAddressLower != lowerAddress {
+		t.Fatalf("expected lower address=%s, got %s", lowerAddress, got[0].FromAddressLower)
+	}
+}
+
+func TestTransactionRepository_ListTransactionsByAddress_OrdersByBlockNumberAndTxIndexDesc(t *testing.T) {
+	r, db := setupTransactionRepo(t)
+	ctx := context.Background()
+
+	address := "0x1111111111111111111111111111111111111111"
+
+	txs := []*models.Transaction{
+		newTestTransaction("0xtxhash1", 100, 1),
+		newTestTransaction("0xtxhash2", 101, 0),
+		newTestTransaction("0xtxhash3", 101, 2),
+		newTestTransaction("0xtxhash4", 99, 9),
+	}
+
+	for _, tx := range txs {
+		if err := db.Create(tx).Error; err != nil {
+			t.Fatalf("seed transaction %s: %v", tx.Hash, err)
+		}
+	}
+
+	got, err := r.ListTransactionsByAddress(ctx, address, 10, 0)
+	if err != nil {
+		t.Fatalf("list transactions by address: %v", err)
+	}
+
+	if len(got) != 4 {
+		t.Fatalf("expected 4 transactions, got %d", len(got))
+	}
+
+	expectedHashes := []string{
+		"0xtxhash3", // block 101, tx_index 2
+		"0xtxhash2", // block 101, tx_index 0
+		"0xtxhash1", // block 100, tx_index 1
+		"0xtxhash4", // block 99, tx_index 9
+	}
+
+	for i, expectedHash := range expectedHashes {
+		if got[i].Hash != expectedHash {
+			t.Fatalf("expected got[%d].Hash=%s, got %s", i, expectedHash, got[i].Hash)
+		}
+	}
+}
+
+func TestTransactionRepository_ListTransactionsByAddress_AppliesLimitAndOffset(t *testing.T) {
+	r, db := setupTransactionRepo(t)
+	ctx := context.Background()
+
+	address := "0x1111111111111111111111111111111111111111"
+
+	txs := []*models.Transaction{
+		newTestTransaction("0xtxhash1", 100, 0),
+		newTestTransaction("0xtxhash2", 101, 0),
+		newTestTransaction("0xtxhash3", 102, 0),
+	}
+
+	for _, tx := range txs {
+		if err := db.Create(tx).Error; err != nil {
+			t.Fatalf("seed transaction %s: %v", tx.Hash, err)
+		}
+	}
+
+	got, err := r.ListTransactionsByAddress(ctx, address, 1, 1)
+	if err != nil {
+		t.Fatalf("list transactions by address: %v", err)
+	}
+
+	if len(got) != 1 {
+		t.Fatalf("expected 1 transaction, got %d", len(got))
+	}
+
+	// Sorted order should be:
+	// 0xtxhash3 block 102
+	// 0xtxhash2 block 101
+	// 0xtxhash1 block 100
+	//
+	// limit=1 offset=1 should return the second item.
+	if got[0].Hash != "0xtxhash2" {
+		t.Fatalf("expected hash=0xtxhash2, got %s", got[0].Hash)
+	}
+}
+
+func TestTransactionRepository_ListTransactionsByAddress_ReturnsEmptySliceWhenNoMatch(t *testing.T) {
+	r, db := setupTransactionRepo(t)
+	ctx := context.Background()
+
+	tx := newTestTransaction("0xtxhash1", 100, 0)
+
+	if err := db.Create(tx).Error; err != nil {
+		t.Fatalf("seed transaction: %v", err)
+	}
+
+	got, err := r.ListTransactionsByAddress(
+		ctx,
+		"0x9999999999999999999999999999999999999999",
+		10,
+		0,
+	)
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+
+	if len(got) != 0 {
+		t.Fatalf("expected 0 transactions, got %d", len(got))
 	}
 }

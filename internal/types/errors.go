@@ -19,4 +19,6 @@ var (
 	ErrDBTimeout  = errors.New("db timeout")
 
 	ErrRequestCanceled = errors.New("request canceled")
+
+	ErrInvalidPagination = errors.New("invalid pagination")
 )

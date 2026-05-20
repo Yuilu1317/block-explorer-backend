@@ -36,7 +36,6 @@ func NewRouter(
 	{
 		txGroup.GET("/:hash", txController.GetTxDetailByHashFromRPC)
 	}
-	r.GET("/indexed/tx/:hash", txController.GetIndexedTransactionByHash)
 
 	blockGroup := r.Group("/block")
 	{
@@ -49,6 +48,12 @@ func NewRouter(
 	addressGroup := r.Group("/address")
 	{
 		addressGroup.GET("/:address", addressController.GetAddress)
+	}
+
+	indexedGroup := r.Group("/indexed")
+	{
+		indexedGroup.GET("/tx/:hash", txController.GetIndexedTransactionByHash)
+		indexedGroup.GET("/address/:address/transactions", addressController.GetIndexedTransactionsByAddress)
 	}
 
 	return r

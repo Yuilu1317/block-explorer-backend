@@ -1,18 +1,9 @@
 package types
 
-import gethtypes "github.com/ethereum/go-ethereum/core/types"
-
-type TxRaw struct {
-	Tx        *gethtypes.Transaction
-	From      string
-	IsPending bool
-	Receipt   *gethtypes.Receipt
-}
-
 type TxDetailDTO struct {
 	Hash        string  `json:"hash"`
-	FromAddress string  `json:"from"`
-	ToAddress   string  `json:"to"`
+	FromAddress string  `json:"from_address"`
+	ToAddress   string  `json:"to_address"`
 	ValueWei    string  `json:"value_wei"`
 	Nonce       uint64  `json:"nonce"`
 	GasLimit    uint64  `json:"gas_limit"`

@@ -4,6 +4,7 @@ import (
 	"block-explorer-backend/internal/db/models"
 	"block-explorer-backend/internal/types"
 	"math/big"
+	"strings"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -243,5 +244,172 @@ func TestToTransactionModel(t *testing.T) {
 
 	if model.InputData != "0xabcd" {
 		t.Fatalf("expected input data %q, got %q", "0xabcd", model.InputData)
+	}
+}
+
+func newAddressMapperTestTransaction(
+	hash string,
+	from string,
+	to string,
+) *models.Transaction {
+	return &models.Transaction{
+		Hash:        hash,
+		BlockNumber: 100,
+		BlockHash:   "0xblockhash",
+		TxIndex:     3,
+
+		FromAddress:      from,
+		FromAddressLower: strings.ToLower(from),
+		ToAddress:        to,
+		ToAddressLower:   strings.ToLower(to),
+
+		Nonce:       7,
+		ValueWei:    "1000000000000000000",
+		GasLimit:    21000,
+		GasPriceWei: "1000000000",
+		InputData:   "0xabcdef",
+	}
+}
+
+func TestToAddressTransactionDTO_NilInput(t *testing.T) {
+	got := ToAddressTransactionDTO(nil, "0x1111111111111111111111111111111111111111")
+	if got != nil {
+		t.Fatalf("expected nil, got %+v", got)
+	}
+}
+
+func TestToAddressTransactionDTO_MapsCommonFields(t *testing.T) {
+	queryAddress := "0x1111111111111111111111111111111111111111"
+	toAddress := "0x2222222222222222222222222222222222222222"
+
+	tx := newAddressMapperTestTransaction("0xtxhash1", queryAddress, toAddress)
+
+	got := ToAddressTransactionDTO(tx, strings.ToLower(queryAddress))
+	if got == nil {
+		t.Fatalf("expected dto, got nil")
+	}
+
+	if got.Hash != tx.Hash {
+		t.Fatalf("expected hash=%s, got %s", tx.Hash, got.Hash)
+	}
+
+	if got.BlockNumber != tx.BlockNumber {
+		t.Fatalf("expected block number=%d, got %d", tx.BlockNumber, got.BlockNumber)
+	}
+
+	if got.BlockHash != tx.BlockHash {
+		t.Fatalf("expected block hash=%s, got %s", tx.BlockHash, got.BlockHash)
+	}
+
+	if got.TxIndex != tx.TxIndex {
+		t.Fatalf("expected tx index=%d, got %d", tx.TxIndex, got.TxIndex)
+	}
+
+	if got.FromAddress != tx.FromAddress {
+		t.Fatalf("expected from address=%s, got %s", tx.FromAddress, got.FromAddress)
+	}
+
+	if got.ToAddress != tx.ToAddress {
+		t.Fatalf("expected to address=%s, got %s", tx.ToAddress, got.ToAddress)
+	}
+
+	if got.Nonce != tx.Nonce {
+		t.Fatalf("expected nonce=%d, got %d", tx.Nonce, got.Nonce)
+	}
+
+	if got.ValueWei != tx.ValueWei {
+		t.Fatalf("expected value wei=%s, got %s", tx.ValueWei, got.ValueWei)
+	}
+
+	if got.GasLimit != tx.GasLimit {
+		t.Fatalf("expected gas limit=%d, got %d", tx.GasLimit, got.GasLimit)
+	}
+
+	if got.GasPriceWei != tx.GasPriceWei {
+		t.Fatalf("expected gas price wei=%s, got %s", tx.GasPriceWei, got.GasPriceWei)
+	}
+
+	if got.InputData != tx.InputData {
+		t.Fatalf("expected input data=%s, got %s", tx.InputData, got.InputData)
+	}
+}
+
+func TestToAddressTransactionDTO_SelfDirection(t *testing.T) {
+	queryAddress := "0x1111111111111111111111111111111111111111"
+
+	tx := newAddressMapperTestTransaction("0xtxhash1", queryAddress, queryAddress)
+
+	got := ToAddressTransactionDTO(tx, strings.ToLower(queryAddress))
+	if got == nil {
+		t.Fatalf("expected dto, got nil")
+	}
+
+	if got.Direction != "self" {
+		t.Fatalf("expected direction=self, got %s", got.Direction)
+	}
+
+	if got.CounterpartyAddress != tx.ToAddress {
+		t.Fatalf("expected counterparty=%s, got %s", tx.ToAddress, got.CounterpartyAddress)
+	}
+}
+
+func TestToAddressTransactionDTO_OutDirection(t *testing.T) {
+	queryAddress := "0x1111111111111111111111111111111111111111"
+	toAddress := "0x2222222222222222222222222222222222222222"
+
+	tx := newAddressMapperTestTransaction("0xtxhash1", queryAddress, toAddress)
+
+	got := ToAddressTransactionDTO(tx, strings.ToLower(queryAddress))
+	if got == nil {
+		t.Fatalf("expected dto, got nil")
+	}
+
+	if got.Direction != "out" {
+		t.Fatalf("expected direction=out, got %s", got.Direction)
+	}
+
+	if got.CounterpartyAddress != toAddress {
+		t.Fatalf("expected counterparty=%s, got %s", toAddress, got.CounterpartyAddress)
+	}
+}
+
+func TestToAddressTransactionDTO_InDirection(t *testing.T) {
+	queryAddress := "0x1111111111111111111111111111111111111111"
+	fromAddress := "0x2222222222222222222222222222222222222222"
+
+	tx := newAddressMapperTestTransaction("0xtxhash1", fromAddress, queryAddress)
+
+	got := ToAddressTransactionDTO(tx, strings.ToLower(queryAddress))
+	if got == nil {
+		t.Fatalf("expected dto, got nil")
+	}
+
+	if got.Direction != "in" {
+		t.Fatalf("expected direction=in, got %s", got.Direction)
+	}
+
+	if got.CounterpartyAddress != fromAddress {
+		t.Fatalf("expected counterparty=%s, got %s", fromAddress, got.CounterpartyAddress)
+	}
+}
+
+func TestToAddressTransactionDTO_UnknownDirection(t *testing.T) {
+	queryAddress := "0x9999999999999999999999999999999999999999"
+	fromAddress := "0x1111111111111111111111111111111111111111"
+	toAddress := "0x2222222222222222222222222222222222222222"
+
+	tx := newAddressMapperTestTransaction("0xtxhash1", fromAddress, toAddress)
+
+	got := ToAddressTransactionDTO(tx, strings.ToLower(queryAddress))
+	if got == nil {
+		t.Fatalf("expected dto, got nil")
+	}
+
+	if got.Direction != "unknown" {
+		t.Fatalf("expected direction=unknown, got %s", got.Direction)
+	}
+
+	if got.CounterpartyAddress != "" {
+		t.Fatalf("expected empty counterparty, got %s", got.CounterpartyAddress)
 	}
 }

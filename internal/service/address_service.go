@@ -1,12 +1,13 @@
 package service
 
 import (
+	"block-explorer-backend/internal/db/models"
+	"block-explorer-backend/internal/mapper"
 	"block-explorer-backend/internal/types"
+	"block-explorer-backend/internal/utils"
 	"context"
 	"fmt"
 	"strings"
-
-	"github.com/ethereum/go-ethereum/common"
 )
 
 type AddressRPC interface {
@@ -15,20 +16,32 @@ type AddressRPC interface {
 	GetCode(ctx context.Context, address string) (string, error)
 }
 
-type AddressService struct {
-	addressRPC AddressRPC
+type TxRepoToAddressService interface {
+	ListTransactionsByAddress(
+		ctx context.Context,
+		address string,
+		limit int,
+		offset int,
+	) ([]models.Transaction, error)
 }
 
-func NewAddressService(addressRPC AddressRPC) *AddressService {
+type AddressService struct {
+	addressRPC             AddressRPC
+	txRepoToAddressService TxRepoToAddressService
+}
+
+func NewAddressService(addressRPC AddressRPC, txRepoToAddressService TxRepoToAddressService) *AddressService {
 	return &AddressService{
-		addressRPC: addressRPC,
+		addressRPC:             addressRPC,
+		txRepoToAddressService: txRepoToAddressService,
 	}
 }
 
 func (s *AddressService) GetAddress(ctx context.Context, address string) (*types.AddressInfo, error) {
 	address = strings.TrimSpace(address)
+	validateAddress := strings.ToLower(address)
 
-	if !isValidAddress(address) {
+	if err := utils.ValidateAddress(validateAddress); err != nil {
 		return nil, types.ErrInvalidAddress
 	}
 
@@ -55,6 +68,38 @@ func (s *AddressService) GetAddress(ctx context.Context, address string) (*types
 	}, nil
 }
 
-func isValidAddress(address string) bool {
-	return common.IsHexAddress(address)
+func (s *AddressService) GetIndexedTransactionsByAddress(
+	ctx context.Context,
+	address string,
+	page int,
+	pageSize int,
+) (*types.AddressTransactionListDTO, error) {
+	address = strings.TrimSpace(address)
+	address = strings.ToLower(address)
+
+	if err := utils.ValidateAddress(address); err != nil {
+		return nil, types.ErrInvalidAddress
+	}
+
+	if page <= 0 || pageSize <= 0 || pageSize > 100 {
+		return nil, types.ErrInvalidPagination
+	}
+	limit := pageSize
+	offset := (page - 1) * pageSize
+
+	txs, err := s.txRepoToAddressService.ListTransactionsByAddress(ctx, address, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("list indexed transactions by address %s: %w", address, err)
+	}
+
+	result := make([]*types.AddressTransactionDTO, 0, len(txs))
+	for i := range txs {
+		result = append(result, mapper.ToAddressTransactionDTO(&txs[i], address))
+	}
+
+	return &types.AddressTransactionListDTO{
+		Items:    result,
+		Page:     page,
+		PageSize: pageSize,
+	}, nil
 }

@@ -2,6 +2,7 @@ package rpc
 
 import (
 	"block-explorer-backend/internal/types"
+	"block-explorer-backend/internal/utils/ethutils"
 	"context"
 	"errors"
 	"fmt"
@@ -52,7 +53,7 @@ func (r *TxRPC) GetTransactionByHash(ctx context.Context, hash string) (*types.T
 	}
 
 	signer := gethtypes.LatestSignerForChainID(chainID)
-	from, err := signer.Sender(tx)
+	from, err := ethutils.RecoverSender(signer, tx)
 	if err != nil {
 		return nil, fmt.Errorf("rpc: derive sender from tx %s: %w", hash, err)
 	}

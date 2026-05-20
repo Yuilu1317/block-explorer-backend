@@ -24,6 +24,23 @@ func ValidateTxHash(hash string) error {
 	return nil
 }
 
+func ValidateAddress(address string) error {
+	if !strings.HasPrefix(address, "0x") {
+		return types.ErrInvalidTxHash
+	}
+
+	if len(address) != 42 {
+		return types.ErrInvalidAddress
+	}
+
+	for _, ch := range address[2:] {
+		if !isHexChar(ch) {
+			return types.ErrInvalidAddress
+		}
+	}
+	return nil
+}
+
 func isHexChar(ch rune) bool {
 	switch {
 	case ch >= '0' && ch <= '9':

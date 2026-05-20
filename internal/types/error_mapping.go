@@ -74,6 +74,11 @@ func MapError(err error) (int, ErrorResponse) {
 			Code:    http.StatusConflict,
 			Message: "chain discontinuity detected",
 		}
+	case errors.Is(err, ErrInvalidPagination):
+		return http.StatusBadRequest, ErrorResponse{
+			Code:    http.StatusBadRequest,
+			Message: "invalid pagination",
+		}
 
 	default:
 		return http.StatusInternalServerError, ErrorResponse{

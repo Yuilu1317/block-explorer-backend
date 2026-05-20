@@ -63,3 +63,28 @@ func (r *TransactionRepository) GetTransactionByHash(ctx context.Context, hash s
 
 	return &tx, true, nil
 }
+
+func (r *TransactionRepository) ListTransactionsByAddress(
+	ctx context.Context,
+	address string,
+	limit int,
+	offset int,
+) ([]models.Transaction, error) {
+	txs := make([]models.Transaction, 0)
+
+	err := r.db.WithContext(ctx).
+		Where("from_address_lower = ? OR to_address_lower = ?", address, address).
+		Order("block_number DESC, tx_index DESC").
+		Limit(limit).
+		Offset(offset).
+		Find(&txs).
+		Error
+
+	if err != nil {
+		if mapped := mapDBError(err); mapped != nil {
+			return nil, mapped
+		}
+		return nil, fmt.Errorf("list transactions by address %s: %w", address, err)
+	}
+	return txs, nil
+}
