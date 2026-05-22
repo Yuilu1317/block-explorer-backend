@@ -2,7 +2,9 @@ package repo
 
 import (
 	"block-explorer-backend/internal/db/models"
+	"block-explorer-backend/internal/types"
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -472,5 +474,432 @@ func TestTransactionRepository_ListTransactionsByAddress_ReturnsEmptySliceWhenNo
 
 	if len(got) != 0 {
 		t.Fatalf("expected 0 transactions, got %d", len(got))
+	}
+}
+
+func TestTransactionRepository_UpdateTransactionReceiptByHash_SuccessStatusOne(t *testing.T) {
+	r, db := setupTransactionRepo(t)
+	ctx := context.Background()
+
+	tx := newTestTransaction("0xtxhash1", 100, 0)
+	if err := db.Create(tx).Error; err != nil {
+		t.Fatalf("seed transaction: %v", err)
+	}
+
+	status := uint64(1)
+	gasUsed := uint64(21000)
+
+	if err := r.UpdateTransactionReceiptByHash(ctx, "0xtxhash1", &status, &gasUsed); err != nil {
+		t.Fatalf("update transaction receipt: %v", err)
+	}
+
+	var got models.Transaction
+	if err := db.First(&got, "hash = ?", "0xtxhash1").Error; err != nil {
+		t.Fatalf("get transaction: %v", err)
+	}
+
+	if got.ReceiptStatus == nil {
+		t.Fatalf("expected receipt status, got nil")
+	}
+	if *got.ReceiptStatus != uint64(1) {
+		t.Fatalf("expected receipt status=1, got %d", *got.ReceiptStatus)
+	}
+
+	if got.ReceiptGasUsed == nil {
+		t.Fatalf("expected receipt gas used, got nil")
+	}
+	if *got.ReceiptGasUsed != uint64(21000) {
+		t.Fatalf("expected receipt gas used=21000, got %d", *got.ReceiptGasUsed)
+	}
+}
+
+func TestTransactionRepository_UpdateTransactionReceiptByHash_SuccessStatusZero(t *testing.T) {
+	r, db := setupTransactionRepo(t)
+	ctx := context.Background()
+
+	tx := newTestTransaction("0xtxhash1", 100, 0)
+	if err := db.Create(tx).Error; err != nil {
+		t.Fatalf("seed transaction: %v", err)
+	}
+
+	status := uint64(0)
+	gasUsed := uint64(21000)
+
+	if err := r.UpdateTransactionReceiptByHash(ctx, "0xtxhash1", &status, &gasUsed); err != nil {
+		t.Fatalf("update transaction receipt: %v", err)
+	}
+
+	var got models.Transaction
+	if err := db.First(&got, "hash = ?", "0xtxhash1").Error; err != nil {
+		t.Fatalf("get transaction: %v", err)
+	}
+
+	if got.ReceiptStatus == nil {
+		t.Fatalf("expected receipt status, got nil")
+	}
+	if *got.ReceiptStatus != uint64(0) {
+		t.Fatalf("expected receipt status=0, got %d", *got.ReceiptStatus)
+	}
+
+	if got.ReceiptGasUsed == nil {
+		t.Fatalf("expected receipt gas used, got nil")
+	}
+	if *got.ReceiptGasUsed != uint64(21000) {
+		t.Fatalf("expected receipt gas used=21000, got %d", *got.ReceiptGasUsed)
+	}
+}
+
+func TestTransactionRepository_UpdateTransactionReceiptByHash_NotFound(t *testing.T) {
+	r, db := setupTransactionRepo(t)
+	ctx := context.Background()
+
+	tx := newTestTransaction("0xtxhash1", 100, 0)
+	if err := db.Create(tx).Error; err != nil {
+		t.Fatalf("seed transaction: %v", err)
+	}
+
+	status := uint64(1)
+	gasUsed := uint64(21000)
+
+	err := r.UpdateTransactionReceiptByHash(ctx, "0xmissing", &status, &gasUsed)
+	if !errors.Is(err, types.ErrTxNotFound) {
+		t.Fatalf("expected ErrTxNotFound, got %v", err)
+	}
+
+	var got models.Transaction
+	if err := db.First(&got, "hash = ?", "0xtxhash1").Error; err != nil {
+		t.Fatalf("get transaction: %v", err)
+	}
+
+	if got.ReceiptStatus != nil {
+		t.Fatalf("expected receipt status nil, got %d", *got.ReceiptStatus)
+	}
+	if got.ReceiptGasUsed != nil {
+		t.Fatalf("expected receipt gas used nil, got %d", *got.ReceiptGasUsed)
+	}
+}
+
+func TestTransactionRepository_UpdateTransactionReceiptByHash_DoesNotModifyTransactionFields(t *testing.T) {
+	r, db := setupTransactionRepo(t)
+	ctx := context.Background()
+
+	tx := newTestTransaction("0xtxhash1", 100, 0)
+	if err := db.Create(tx).Error; err != nil {
+		t.Fatalf("seed transaction: %v", err)
+	}
+
+	originalBlockNumber := tx.BlockNumber
+	originalBlockHash := tx.BlockHash
+	originalTxIndex := tx.TxIndex
+	originalFromAddress := tx.FromAddress
+	originalFromAddressLower := tx.FromAddressLower
+	originalToAddress := tx.ToAddress
+	originalToAddressLower := tx.ToAddressLower
+	originalNonce := tx.Nonce
+	originalValueWei := tx.ValueWei
+	originalGasLimit := tx.GasLimit
+	originalGasPriceWei := tx.GasPriceWei
+	originalInputData := tx.InputData
+
+	status := uint64(1)
+	gasUsed := uint64(21000)
+
+	if err := r.UpdateTransactionReceiptByHash(ctx, "0xtxhash1", &status, &gasUsed); err != nil {
+		t.Fatalf("update transaction receipt: %v", err)
+	}
+
+	var got models.Transaction
+	if err := db.First(&got, "hash = ?", "0xtxhash1").Error; err != nil {
+		t.Fatalf("get transaction: %v", err)
+	}
+
+	if got.BlockNumber != originalBlockNumber {
+		t.Fatalf("expected block number=%d, got %d", originalBlockNumber, got.BlockNumber)
+	}
+	if got.BlockHash != originalBlockHash {
+		t.Fatalf("expected block hash=%s, got %s", originalBlockHash, got.BlockHash)
+	}
+	if got.TxIndex != originalTxIndex {
+		t.Fatalf("expected tx index=%d, got %d", originalTxIndex, got.TxIndex)
+	}
+	if got.FromAddress != originalFromAddress {
+		t.Fatalf("expected from address=%s, got %s", originalFromAddress, got.FromAddress)
+	}
+	if got.FromAddressLower != originalFromAddressLower {
+		t.Fatalf("expected from address lower=%s, got %s", originalFromAddressLower, got.FromAddressLower)
+	}
+	if got.ToAddress != originalToAddress {
+		t.Fatalf("expected to address=%s, got %s", originalToAddress, got.ToAddress)
+	}
+	if got.ToAddressLower != originalToAddressLower {
+		t.Fatalf("expected to address lower=%s, got %s", originalToAddressLower, got.ToAddressLower)
+	}
+	if got.Nonce != originalNonce {
+		t.Fatalf("expected nonce=%d, got %d", originalNonce, got.Nonce)
+	}
+	if got.ValueWei != originalValueWei {
+		t.Fatalf("expected value wei=%s, got %s", originalValueWei, got.ValueWei)
+	}
+	if got.GasLimit != originalGasLimit {
+		t.Fatalf("expected gas limit=%d, got %d", originalGasLimit, got.GasLimit)
+	}
+	if got.GasPriceWei != originalGasPriceWei {
+		t.Fatalf("expected gas price wei=%s, got %s", originalGasPriceWei, got.GasPriceWei)
+	}
+	if got.InputData != originalInputData {
+		t.Fatalf("expected input data=%s, got %s", originalInputData, got.InputData)
+	}
+
+	if got.ReceiptStatus == nil {
+		t.Fatalf("expected receipt status, got nil")
+	}
+	if *got.ReceiptStatus != uint64(1) {
+		t.Fatalf("expected receipt status=1, got %d", *got.ReceiptStatus)
+	}
+
+	if got.ReceiptGasUsed == nil {
+		t.Fatalf("expected receipt gas used, got nil")
+	}
+	if *got.ReceiptGasUsed != uint64(21000) {
+		t.Fatalf("expected receipt gas used=21000, got %d", *got.ReceiptGasUsed)
+	}
+}
+
+func TestTransactionRepository_UpdateTransactionReceiptByHash_DBError(t *testing.T) {
+	r, db := setupTransactionRepo(t)
+	ctx := context.Background()
+
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("get sql db: %v", err)
+	}
+
+	if err := sqlDB.Close(); err != nil {
+		t.Fatalf("close db: %v", err)
+	}
+
+	status := uint64(1)
+	gasUsed := uint64(21000)
+
+	err = r.UpdateTransactionReceiptByHash(ctx, "0xtxhash1", &status, &gasUsed)
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+}
+
+func findTransactionByHash(txs []*models.Transaction, hash string) *models.Transaction {
+	for _, tx := range txs {
+		if tx.Hash == hash {
+			return tx
+		}
+	}
+	return nil
+}
+
+func TestTransactionRepository_ListTransactionsMissingReceiptByBlockNumber_FiltersCorrectly(t *testing.T) {
+	r, db := setupTransactionRepo(t)
+	ctx := context.Background()
+
+	statusOne := uint64(1)
+	statusZero := uint64(0)
+	gasUsed := uint64(21000)
+
+	missingBoth := newTestTransaction("0xmissingboth", 100, 0)
+	// ReceiptStatus nil, ReceiptGasUsed nil
+
+	alreadySuccess := newTestTransaction("0xalreadysuccess", 100, 1)
+	alreadySuccess.ReceiptStatus = &statusOne
+	alreadySuccess.ReceiptGasUsed = &gasUsed
+
+	alreadyFailed := newTestTransaction("0xalreadyfailed", 100, 2)
+	alreadyFailed.ReceiptStatus = &statusZero
+	alreadyFailed.ReceiptGasUsed = &gasUsed
+
+	missingGasUsed := newTestTransaction("0xmissinggasused", 100, 3)
+	missingGasUsed.ReceiptStatus = &statusOne
+	// ReceiptGasUsed nil
+
+	missingStatus := newTestTransaction("0xmissingstatus", 100, 4)
+	// ReceiptStatus nil
+	missingStatus.ReceiptGasUsed = &gasUsed
+
+	otherBlockMissing := newTestTransaction("0xotherblockmissing", 101, 0)
+	// ReceiptStatus nil, ReceiptGasUsed nil, but block_number is different
+
+	txs := []*models.Transaction{
+		missingBoth,
+		alreadySuccess,
+		alreadyFailed,
+		missingGasUsed,
+		missingStatus,
+		otherBlockMissing,
+	}
+
+	for _, tx := range txs {
+		if err := db.Create(tx).Error; err != nil {
+			t.Fatalf("seed transaction %s: %v", tx.Hash, err)
+		}
+	}
+
+	got, err := r.ListTransactionsMissingReceiptByBlockNumber(ctx, 100)
+	if err != nil {
+		t.Fatalf("list transactions missing receipt: %v", err)
+	}
+
+	if len(got) != 3 {
+		t.Fatalf("expected 3 missing receipt transactions, got %d", len(got))
+	}
+
+	gotMissingBoth := findTransactionByHash(got, "0xmissingboth")
+	if gotMissingBoth == nil {
+		t.Fatalf("expected missing-both transaction to be returned")
+	}
+	if gotMissingBoth.ReceiptStatus != nil {
+		t.Fatalf("expected missing-both receipt status nil, got %d", *gotMissingBoth.ReceiptStatus)
+	}
+	if gotMissingBoth.ReceiptGasUsed != nil {
+		t.Fatalf("expected missing-both receipt gas used nil, got %d", *gotMissingBoth.ReceiptGasUsed)
+	}
+
+	gotMissingGasUsed := findTransactionByHash(got, "0xmissinggasused")
+	if gotMissingGasUsed == nil {
+		t.Fatalf("expected missing-gas-used transaction to be returned")
+	}
+	if gotMissingGasUsed.ReceiptStatus == nil {
+		t.Fatalf("expected missing-gas-used receipt status, got nil")
+	}
+	if *gotMissingGasUsed.ReceiptStatus != uint64(1) {
+		t.Fatalf("expected missing-gas-used receipt status=1, got %d", *gotMissingGasUsed.ReceiptStatus)
+	}
+	if gotMissingGasUsed.ReceiptGasUsed != nil {
+		t.Fatalf("expected missing-gas-used receipt gas used nil, got %d", *gotMissingGasUsed.ReceiptGasUsed)
+	}
+
+	gotMissingStatus := findTransactionByHash(got, "0xmissingstatus")
+	if gotMissingStatus == nil {
+		t.Fatalf("expected missing-status transaction to be returned")
+	}
+	if gotMissingStatus.ReceiptStatus != nil {
+		t.Fatalf("expected missing-status receipt status nil, got %d", *gotMissingStatus.ReceiptStatus)
+	}
+	if gotMissingStatus.ReceiptGasUsed == nil {
+		t.Fatalf("expected missing-status receipt gas used, got nil")
+	}
+	if *gotMissingStatus.ReceiptGasUsed != uint64(21000) {
+		t.Fatalf("expected missing-status receipt gas used=21000, got %d", *gotMissingStatus.ReceiptGasUsed)
+	}
+
+	if findTransactionByHash(got, "0xalreadysuccess") != nil {
+		t.Fatalf("expected already-success transaction not to be returned")
+	}
+
+	if findTransactionByHash(got, "0xalreadyfailed") != nil {
+		t.Fatalf("expected already-failed transaction not to be returned")
+	}
+
+	if findTransactionByHash(got, "0xotherblockmissing") != nil {
+		t.Fatalf("expected other-block missing transaction not to be returned")
+	}
+}
+
+func TestTransactionRepository_ListTransactionsMissingReceiptByBlockNumber_OrdersByTxIndexAsc(t *testing.T) {
+	r, db := setupTransactionRepo(t)
+	ctx := context.Background()
+
+	txs := []*models.Transaction{
+		newTestTransaction("0xtxhash2", 100, 2),
+		newTestTransaction("0xtxhash0", 100, 0),
+		newTestTransaction("0xtxhash1", 100, 1),
+	}
+
+	for _, tx := range txs {
+		if err := db.Create(tx).Error; err != nil {
+			t.Fatalf("seed transaction %s: %v", tx.Hash, err)
+		}
+	}
+
+	got, err := r.ListTransactionsMissingReceiptByBlockNumber(ctx, 100)
+	if err != nil {
+		t.Fatalf("list transactions missing receipt: %v", err)
+	}
+
+	if len(got) != 3 {
+		t.Fatalf("expected 3 transactions, got %d", len(got))
+	}
+
+	expectedHashes := []string{
+		"0xtxhash0",
+		"0xtxhash1",
+		"0xtxhash2",
+	}
+
+	for i, expectedHash := range expectedHashes {
+		if got[i].Hash != expectedHash {
+			t.Fatalf("expected got[%d].Hash=%s, got %s", i, expectedHash, got[i].Hash)
+		}
+	}
+}
+
+func TestTransactionRepository_ListTransactionsMissingReceiptByBlockNumber_ReturnsEmptySliceWhenNoMissingReceipt(t *testing.T) {
+	r, db := setupTransactionRepo(t)
+	ctx := context.Background()
+
+	statusOne := uint64(1)
+	statusZero := uint64(0)
+	gasUsed := uint64(21000)
+
+	successTx := newTestTransaction("0xsuccess", 100, 0)
+	successTx.ReceiptStatus = &statusOne
+	successTx.ReceiptGasUsed = &gasUsed
+
+	failedTx := newTestTransaction("0xfailed", 100, 1)
+	failedTx.ReceiptStatus = &statusZero
+	failedTx.ReceiptGasUsed = &gasUsed
+
+	txs := []*models.Transaction{
+		successTx,
+		failedTx,
+	}
+
+	for _, tx := range txs {
+		if err := db.Create(tx).Error; err != nil {
+			t.Fatalf("seed transaction %s: %v", tx.Hash, err)
+		}
+	}
+
+	got, err := r.ListTransactionsMissingReceiptByBlockNumber(ctx, 100)
+	if err != nil {
+		t.Fatalf("list transactions missing receipt: %v", err)
+	}
+
+	if got == nil {
+		t.Fatalf("expected empty slice, got nil")
+	}
+
+	if len(got) != 0 {
+		t.Fatalf("expected 0 transactions, got %d", len(got))
+	}
+}
+
+func TestTransactionRepository_ListTransactionsMissingReceiptByBlockNumber_DBError(t *testing.T) {
+	r, db := setupTransactionRepo(t)
+	ctx := context.Background()
+
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("get sql db: %v", err)
+	}
+
+	if err := sqlDB.Close(); err != nil {
+		t.Fatalf("close db: %v", err)
+	}
+
+	got, err := r.ListTransactionsMissingReceiptByBlockNumber(ctx, 100)
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+
+	if got != nil {
+		t.Fatalf("expected nil transactions, got %+v", got)
 	}
 }

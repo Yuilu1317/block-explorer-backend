@@ -52,7 +52,9 @@ func Run() error {
 
 	blockRPC := rpc.NewBlockRPC(ethClient, rpcClient, cfg.Rpc.TimeoutSeconds)
 	blockRepo := repo.NewBlockRepository(database)
-	blockService := service.NewBlockService(blockRPC, blockRepo)
+	// txService implements TransactionReceiptSyncer.
+	// BlockService uses it to sync transaction receipts after block + transactions are inserted.
+	blockService := service.NewBlockService(blockRPC, blockRepo, txService)
 	blockController := controller.NewBlockController(blockService)
 
 	addressRPC := rpc.NewAddressRPC(ethClient, rpcClient, cfg.Rpc.TimeoutSeconds)

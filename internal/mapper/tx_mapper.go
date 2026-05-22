@@ -11,7 +11,11 @@ import (
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 )
 
-func ToTransactionModel(block *ethtypes.Block, tx *ethtypes.Transaction, txIndex uint, from common.Address) *models.Transaction {
+func ToTransactionModel(block *ethtypes.Block,
+	tx *ethtypes.Transaction,
+	txIndex uint,
+	from common.Address,
+) *models.Transaction {
 	fromAddress := from.Hex()
 	fromAddressLower := strings.ToLower(fromAddress)
 
@@ -107,6 +111,9 @@ func ToIndexedTransactionDTO(tx *models.Transaction) *types.IndexedTransactionDT
 		FromAddress: tx.FromAddress,
 		ToAddress:   tx.ToAddress,
 
+		Status:  tx.ReceiptStatus,
+		GasUsed: tx.ReceiptGasUsed,
+
 		Nonce:       tx.Nonce,
 		ValueWei:    tx.ValueWei,
 		GasLimit:    tx.GasLimit,
@@ -137,7 +144,7 @@ func ToAddressTransactionDTO(
 		direction = "in"
 		counterparty = tx.FromAddress
 	}
-	
+
 	return &types.AddressTransactionDTO{
 		Hash:        tx.Hash,
 		BlockNumber: tx.BlockNumber,
@@ -146,6 +153,9 @@ func ToAddressTransactionDTO(
 
 		FromAddress: tx.FromAddress,
 		ToAddress:   tx.ToAddress,
+
+		Status: tx.ReceiptStatus,
+		GasUsed: tx.ReceiptGasUsed,
 
 		Direction:           direction,
 		CounterpartyAddress: counterparty,

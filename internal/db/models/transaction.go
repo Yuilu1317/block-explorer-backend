@@ -12,9 +12,12 @@ type Transaction struct {
 
 	FromAddress      string `gorm:"column:from_address;type:varchar(42);not null;index"`
 	FromAddressLower string `gorm:"column:from_address_lower;type:varchar(42);not null;index"`
-	
+
 	ToAddress      string `gorm:"column:to_address;type:varchar(42);index"`
 	ToAddressLower string `gorm:"column:to_address_lower;type:varchar(42);index"`
+
+	ReceiptStatus  *uint64 `gorm:"column:receipt_status"`
+	ReceiptGasUsed *uint64 `gorm:"column:receipt_gas_used"`
 
 	Nonce       uint64 `gorm:"not null"`
 	ValueWei    string `gorm:"type:numeric(78,0);not null"`

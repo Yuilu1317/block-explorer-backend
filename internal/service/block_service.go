@@ -26,15 +26,25 @@ type BlockRepository interface {
 	InsertBlockWithTransactions(ctx context.Context, block *models.Block, txs []*models.Transaction) error
 }
 
-type BlockService struct {
-	blockRPC  BlockRPC
-	blockRepo BlockRepository
+type TransactionReceiptSyncer interface {
+	SyncBlockTransactionReceipts(ctx context.Context, blockNumber uint64) error
 }
 
-func NewBlockService(blockRPC BlockRPC, blockRepo BlockRepository) *BlockService {
+type BlockService struct {
+	blockRPC                 BlockRPC
+	blockRepo                BlockRepository
+	transactionReceiptSyncer TransactionReceiptSyncer
+}
+
+func NewBlockService(
+	blockRPC BlockRPC,
+	blockRepo BlockRepository,
+	transactionReceiptSyncer TransactionReceiptSyncer,
+) *BlockService {
 	return &BlockService{
-		blockRPC:  blockRPC,
-		blockRepo: blockRepo,
+		blockRPC:                 blockRPC,
+		blockRepo:                blockRepo,
+		transactionReceiptSyncer: transactionReceiptSyncer,
 	}
 }
 
@@ -147,6 +157,11 @@ func (s *BlockService) SyncBlockToDB(ctx context.Context, number uint64) error {
 	if err := s.blockRepo.InsertBlockWithTransactions(ctx, blockModel, txModels); err != nil {
 		return fmt.Errorf("insert block %d into db: %w", number, err)
 	}
+
+	if err := s.transactionReceiptSyncer.SyncBlockTransactionReceipts(ctx, number); err != nil {
+		return fmt.Errorf("sync transaction receipts for block %d: %w", number, err)
+	}
+
 	return nil
 }
 

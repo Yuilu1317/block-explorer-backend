@@ -80,3 +80,22 @@ func (r *TxRPC) GetTransactionByHash(ctx context.Context, hash string) (*types.T
 		Receipt:   receipt,
 	}, nil
 }
+
+func (r *TxRPC) GetTransactionReceipt(ctx context.Context, hash string) (*gethtypes.Receipt, error) {
+	ctx, cancel := r.withTimeout(ctx)
+	defer cancel()
+
+	txHash := common.HexToHash(hash)
+
+	receipt, err := r.client.TransactionReceipt(ctx, txHash)
+	if err != nil {
+		if errors.Is(err, ethereum.NotFound) {
+			return nil, types.ErrTxReceiptNotFound
+		}
+		if mapped := mapRPCError(err); mapped != nil {
+			return nil, mapped
+		}
+		return nil, fmt.Errorf("rpc: get transaction receipt %s: %w", hash, err)
+	}
+	return receipt, nil
+}

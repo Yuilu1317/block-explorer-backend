@@ -399,3 +399,125 @@ func TestAddressController_GetIndexedTransactionsByAddress_Success(t *testing.T)
 		t.Fatalf("expected response body to contain page_size, got %s", body)
 	}
 }
+
+func TestAddressController_GetIndexedTransactionsByAddress_ReturnsReceiptStatusZero(t *testing.T) {
+	ctrl, svc := setupTestAddressController(t)
+	r := setupAddressRouter(ctrl)
+
+	address := "0x1111111111111111111111111111111111111111"
+	status := uint64(0)
+	gasUsed := uint64(21000)
+
+	svc.addressTxList = &types.AddressTransactionListDTO{
+		Items: []*types.AddressTransactionDTO{
+			{
+				Hash:                "0xtxhash1",
+				BlockNumber:         100,
+				BlockHash:           "0xblockhash",
+				TxIndex:             0,
+				FromAddress:         address,
+				ToAddress:           "0x2222222222222222222222222222222222222222",
+				Status:              &status,
+				GasUsed:             &gasUsed,
+				Direction:           "out",
+				CounterpartyAddress: "0x2222222222222222222222222222222222222222",
+				Nonce:               1,
+				ValueWei:            "1000000000000000000",
+				GasLimit:            21000,
+				GasPriceWei:         "1000000000",
+				InputData:           "0x",
+			},
+		},
+		Page:     1,
+		PageSize: 20,
+	}
+
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/indexed/address/"+address+"/transactions?page=1&page_size=20",
+		nil,
+	)
+	w := httptest.NewRecorder()
+
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d, body=%s", w.Code, w.Body.String())
+	}
+
+	if !svc.calledTxList {
+		t.Fatalf("expected GetIndexedTransactionsByAddress called")
+	}
+
+	if svc.gotAddress != address {
+		t.Fatalf("expected address=%s, got %s", address, svc.gotAddress)
+	}
+
+	body := w.Body.String()
+
+	if !strings.Contains(body, `"status":0`) {
+		t.Fatalf("expected response body to contain status=0, got %s", body)
+	}
+
+	if !strings.Contains(body, `"gas_used":21000`) {
+		t.Fatalf("expected response body to contain gas_used=21000, got %s", body)
+	}
+}
+
+func TestAddressController_GetIndexedTransactionsByAddress_ReturnsNilReceiptFields(t *testing.T) {
+	ctrl, svc := setupTestAddressController(t)
+	r := setupAddressRouter(ctrl)
+
+	address := "0x1111111111111111111111111111111111111111"
+
+	svc.addressTxList = &types.AddressTransactionListDTO{
+		Items: []*types.AddressTransactionDTO{
+			{
+				Hash:                "0xtxhash1",
+				BlockNumber:         100,
+				BlockHash:           "0xblockhash",
+				TxIndex:             0,
+				FromAddress:         address,
+				ToAddress:           "0x2222222222222222222222222222222222222222",
+				Status:              nil,
+				GasUsed:             nil,
+				Direction:           "out",
+				CounterpartyAddress: "0x2222222222222222222222222222222222222222",
+				Nonce:               1,
+				ValueWei:            "1000000000000000000",
+				GasLimit:            21000,
+				GasPriceWei:         "1000000000",
+				InputData:           "0x",
+			},
+		},
+		Page:     1,
+		PageSize: 20,
+	}
+
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/indexed/address/"+address+"/transactions?page=1&page_size=20",
+		nil,
+	)
+	w := httptest.NewRecorder()
+
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d, body=%s", w.Code, w.Body.String())
+	}
+
+	if !svc.calledTxList {
+		t.Fatalf("expected GetIndexedTransactionsByAddress called")
+	}
+
+	body := w.Body.String()
+
+	if !strings.Contains(body, `"status":null`) {
+		t.Fatalf("expected response body to contain status=null, got %s", body)
+	}
+
+	if !strings.Contains(body, `"gas_used":null`) {
+		t.Fatalf("expected response body to contain gas_used=null, got %s", body)
+	}
+}

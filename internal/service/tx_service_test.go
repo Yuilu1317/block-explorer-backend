@@ -19,6 +19,10 @@ type fakeTxServiceRPC struct {
 
 	called  bool
 	gotHash string
+
+	receipts     map[string]*ethtypes.Receipt
+	receiptErrs  map[string]error
+	receiptCalls int
 }
 
 func (f *fakeTxServiceRPC) GetTransactionByHash(ctx context.Context, hash string) (*types.TxRaw, error) {
@@ -32,6 +36,27 @@ func (f *fakeTxServiceRPC) GetTransactionByHash(ctx context.Context, hash string
 	return f.txRaw, nil
 }
 
+func (f *fakeTxServiceRPC) GetTransactionReceipt(ctx context.Context, hash string) (*ethtypes.Receipt, error) {
+	f.called = true
+	f.gotHash = hash
+	f.receiptCalls++
+
+	if f.receiptErrs != nil {
+		if err, ok := f.receiptErrs[hash]; ok {
+			return nil, err
+		}
+	}
+	if f.receipts != nil {
+		return f.receipts[hash], nil
+	}
+	return nil, nil
+}
+
+type updateReceiptCall struct {
+	hash    string
+	status  *uint64
+	gasUsed *uint64
+}
 type fakeTxServiceRepo struct {
 	tx    *models.Transaction
 	found bool
@@ -39,6 +64,14 @@ type fakeTxServiceRepo struct {
 
 	called  bool
 	gotHash string
+
+	txs            []*models.Transaction
+	listErr        error
+	listCalled     bool
+	gotBlockNumber uint64
+
+	updateErr   error
+	updateCalls []updateReceiptCall
 }
 
 func (f *fakeTxServiceRepo) GetTransactionByHash(ctx context.Context, hash string) (*models.Transaction, bool, error) {
@@ -49,6 +82,38 @@ func (f *fakeTxServiceRepo) GetTransactionByHash(ctx context.Context, hash strin
 		return nil, false, f.err
 	}
 	return f.tx, f.found, nil
+}
+
+func (f *fakeTxServiceRepo) ListTransactionsMissingReceiptByBlockNumber(
+	ctx context.Context,
+	blockNumber uint64,
+) ([]*models.Transaction, error) {
+	f.listCalled = true
+	f.gotBlockNumber = blockNumber
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+
+	return f.txs, nil
+}
+
+func (f *fakeTxServiceRepo) UpdateTransactionReceiptByHash(
+	ctx context.Context,
+	hash string,
+	status *uint64,
+	gasUsed *uint64,
+) error {
+	f.updateCalls = append(f.updateCalls, updateReceiptCall{
+		hash:    hash,
+		status:  status,
+		gasUsed: gasUsed,
+	})
+
+	if f.updateErr != nil {
+		return f.updateErr
+	}
+
+	return nil
 }
 
 func setupTxTestService(t *testing.T) (*TxService, *fakeTxServiceRepo, *fakeTxServiceRPC) {
@@ -105,6 +170,16 @@ func testTxRaw() *types.TxRaw {
 		From:      "0x1111111111111111111111111111111111111111",
 		IsPending: false,
 		Receipt:   nil,
+	}
+}
+
+func testReceiptForTransaction(tx *models.Transaction, status uint64, gasUsed uint64) *ethtypes.Receipt {
+	return &ethtypes.Receipt{
+		TxHash:      common.HexToHash(tx.Hash),
+		BlockHash:   common.HexToHash(tx.BlockHash),
+		BlockNumber: new(big.Int).SetUint64(tx.BlockNumber),
+		Status:      status,
+		GasUsed:     gasUsed,
 	}
 }
 
@@ -388,5 +463,301 @@ func TestTxService_GetTxDetailByHashFromRPC_NormalizesHashBeforeQuery(t *testing
 
 	if rpc.gotHash != expectedHash {
 		t.Fatalf("expected rpc hash %q, got %q", expectedHash, rpc.gotHash)
+	}
+}
+
+func TestTxService_validateReceiptMatchesTransaction_Success(t *testing.T) {
+	svc, _, _ := setupTxTestService(t)
+
+	tx := testTransactionModel(validTxServiceTxHash())
+	receipt := testReceiptForTransaction(tx, 1, 21000)
+
+	if err := svc.validateReceiptMatchesTransaction(tx, receipt); err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+}
+
+func TestTxService_validateReceiptMatchesTransaction_ReturnsErrorWhenReceiptNil(t *testing.T) {
+	svc, _, _ := setupTxTestService(t)
+
+	tx := testTransactionModel(validTxServiceTxHash())
+
+	err := svc.validateReceiptMatchesTransaction(tx, nil)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "receipt is nil") {
+		t.Fatalf("expected receipt nil error, got %v", err)
+	}
+}
+
+func TestTxService_validateReceiptMatchesTransaction_ReturnsErrorWhenTxHashMismatch(t *testing.T) {
+	svc, _, _ := setupTxTestService(t)
+
+	tx := testTransactionModel(validTxServiceTxHash())
+	receipt := testReceiptForTransaction(tx, 1, 21000)
+	receipt.TxHash = common.HexToHash("0x" + strings.Repeat("c", 64))
+
+	err := svc.validateReceiptMatchesTransaction(tx, receipt)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "receipt tx hash mismatch") {
+		t.Fatalf("expected tx hash mismatch error, got %v", err)
+	}
+}
+
+func TestTxService_validateReceiptMatchesTransaction_ReturnsErrorWhenBlockNumberNil(t *testing.T) {
+	svc, _, _ := setupTxTestService(t)
+
+	tx := testTransactionModel(validTxServiceTxHash())
+	receipt := testReceiptForTransaction(tx, 1, 21000)
+	receipt.BlockNumber = nil
+
+	err := svc.validateReceiptMatchesTransaction(tx, receipt)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "receipt block number is nil") {
+		t.Fatalf("expected block number nil error, got %v", err)
+	}
+}
+
+func TestTxService_validateReceiptMatchesTransaction_ReturnsErrorWhenBlockNumberMismatch(t *testing.T) {
+	svc, _, _ := setupTxTestService(t)
+
+	tx := testTransactionModel(validTxServiceTxHash())
+	receipt := testReceiptForTransaction(tx, 1, 21000)
+	receipt.BlockNumber = new(big.Int).SetUint64(tx.BlockNumber + 1)
+
+	err := svc.validateReceiptMatchesTransaction(tx, receipt)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "receipt block number mismatch") {
+		t.Fatalf("expected block number mismatch error, got %v", err)
+	}
+}
+
+func TestTxService_validateReceiptMatchesTransaction_ReturnsErrorWhenBlockHashMismatch(t *testing.T) {
+	svc, _, _ := setupTxTestService(t)
+
+	tx := testTransactionModel(validTxServiceTxHash())
+	receipt := testReceiptForTransaction(tx, 1, 21000)
+	receipt.BlockHash = common.HexToHash("0x" + strings.Repeat("d", 64))
+
+	err := svc.validateReceiptMatchesTransaction(tx, receipt)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "receipt block hash mismatch") {
+		t.Fatalf("expected block hash mismatch error, got %v", err)
+	}
+}
+
+func TestTxService_SyncBlockTransactionReceipts_ReturnsListError(t *testing.T) {
+	svc, repo, rpc := setupTxTestService(t)
+
+	listErr := errors.New("db list error")
+	repo.listErr = listErr
+
+	err := svc.SyncBlockTransactionReceipts(context.Background(), 100)
+	if !errors.Is(err, listErr) {
+		t.Fatalf("expected list error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "service: list missing receipt transactions for block 100") {
+		t.Fatalf("expected wrapped list error, got %v", err)
+	}
+
+	if !repo.listCalled {
+		t.Fatal("expected list to be called")
+	}
+	if rpc.receiptCalls != 0 {
+		t.Fatalf("expected no receipt rpc calls, got %d", rpc.receiptCalls)
+	}
+	if len(repo.updateCalls) != 0 {
+		t.Fatalf("expected no update calls, got %d", len(repo.updateCalls))
+	}
+}
+
+func TestTxService_SyncBlockTransactionReceipts_UpdatesStatusOne(t *testing.T) {
+	svc, repo, rpc := setupTxTestService(t)
+
+	tx := testTransactionModel(validTxServiceTxHash())
+	repo.txs = []*models.Transaction{tx}
+
+	rpc.receipts = map[string]*ethtypes.Receipt{
+		tx.Hash: testReceiptForTransaction(tx, 1, 21000),
+	}
+
+	err := svc.SyncBlockTransactionReceipts(context.Background(), tx.BlockNumber)
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+
+	if !repo.listCalled {
+		t.Fatal("expected list to be called")
+	}
+	if repo.gotBlockNumber != tx.BlockNumber {
+		t.Fatalf("expected block number %d, got %d", tx.BlockNumber, repo.gotBlockNumber)
+	}
+
+	if rpc.receiptCalls != 1 {
+		t.Fatalf("expected 1 receipt rpc call, got %d", rpc.receiptCalls)
+	}
+
+	if len(repo.updateCalls) != 1 {
+		t.Fatalf("expected 1 update call, got %d", len(repo.updateCalls))
+	}
+
+	call := repo.updateCalls[0]
+	if call.hash != tx.Hash {
+		t.Fatalf("expected update hash %s, got %s", tx.Hash, call.hash)
+	}
+	if call.status == nil {
+		t.Fatal("expected status, got nil")
+	}
+	if *call.status != uint64(1) {
+		t.Fatalf("expected status=1, got %d", *call.status)
+	}
+	if call.gasUsed == nil {
+		t.Fatal("expected gas used, got nil")
+	}
+	if *call.gasUsed != uint64(21000) {
+		t.Fatalf("expected gas used=21000, got %d", *call.gasUsed)
+	}
+}
+
+func TestTxService_SyncBlockTransactionReceipts_UpdatesStatusZero(t *testing.T) {
+	svc, repo, rpc := setupTxTestService(t)
+
+	tx := testTransactionModel(validTxServiceTxHash())
+	repo.txs = []*models.Transaction{tx}
+
+	rpc.receipts = map[string]*ethtypes.Receipt{
+		tx.Hash: testReceiptForTransaction(tx, 0, 21000),
+	}
+
+	err := svc.SyncBlockTransactionReceipts(context.Background(), tx.BlockNumber)
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+
+	if len(repo.updateCalls) != 1 {
+		t.Fatalf("expected 1 update call, got %d", len(repo.updateCalls))
+	}
+
+	call := repo.updateCalls[0]
+	if call.status == nil {
+		t.Fatal("expected status, got nil")
+	}
+	if *call.status != uint64(0) {
+		t.Fatalf("expected status=0, got %d", *call.status)
+	}
+	if call.gasUsed == nil {
+		t.Fatal("expected gas used, got nil")
+	}
+	if *call.gasUsed != uint64(21000) {
+		t.Fatalf("expected gas used=21000, got %d", *call.gasUsed)
+	}
+}
+
+func TestTxService_SyncBlockTransactionReceipts_SkipsReceiptNotFound(t *testing.T) {
+	svc, repo, rpc := setupTxTestService(t)
+
+	tx := testTransactionModel(validTxServiceTxHash())
+	repo.txs = []*models.Transaction{tx}
+
+	rpc.receiptErrs = map[string]error{
+		tx.Hash: types.ErrTxReceiptNotFound,
+	}
+
+	err := svc.SyncBlockTransactionReceipts(context.Background(), tx.BlockNumber)
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+
+	if rpc.receiptCalls != 1 {
+		t.Fatalf("expected 1 receipt rpc call, got %d", rpc.receiptCalls)
+	}
+
+	if len(repo.updateCalls) != 0 {
+		t.Fatalf("expected no update calls, got %d", len(repo.updateCalls))
+	}
+}
+
+func TestTxService_SyncBlockTransactionReceipts_ReturnsRPCError(t *testing.T) {
+	svc, repo, rpc := setupTxTestService(t)
+
+	tx := testTransactionModel(validTxServiceTxHash())
+	repo.txs = []*models.Transaction{tx}
+
+	rpcErr := errors.New("rpc down")
+	rpc.receiptErrs = map[string]error{
+		tx.Hash: rpcErr,
+	}
+
+	err := svc.SyncBlockTransactionReceipts(context.Background(), tx.BlockNumber)
+	if !errors.Is(err, rpcErr) {
+		t.Fatalf("expected rpc error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "service: get transaction receipt for tx") {
+		t.Fatalf("expected wrapped rpc error, got %v", err)
+	}
+
+	if len(repo.updateCalls) != 0 {
+		t.Fatalf("expected no update calls, got %d", len(repo.updateCalls))
+	}
+}
+
+func TestTxService_SyncBlockTransactionReceipts_ReturnsValidationErrorWithoutUpdate(t *testing.T) {
+	svc, repo, rpc := setupTxTestService(t)
+
+	tx := testTransactionModel(validTxServiceTxHash())
+	repo.txs = []*models.Transaction{tx}
+
+	receipt := testReceiptForTransaction(tx, 1, 21000)
+	receipt.TxHash = common.HexToHash("0x" + strings.Repeat("c", 64))
+
+	rpc.receipts = map[string]*ethtypes.Receipt{
+		tx.Hash: receipt,
+	}
+
+	err := svc.SyncBlockTransactionReceipts(context.Background(), tx.BlockNumber)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "service: validate transaction receipt for tx") {
+		t.Fatalf("expected wrapped validation error, got %v", err)
+	}
+
+	if len(repo.updateCalls) != 0 {
+		t.Fatalf("expected no update calls, got %d", len(repo.updateCalls))
+	}
+}
+
+func TestTxService_SyncBlockTransactionReceipts_ReturnsUpdateError(t *testing.T) {
+	svc, repo, rpc := setupTxTestService(t)
+
+	tx := testTransactionModel(validTxServiceTxHash())
+	repo.txs = []*models.Transaction{tx}
+
+	rpc.receipts = map[string]*ethtypes.Receipt{
+		tx.Hash: testReceiptForTransaction(tx, 1, 21000),
+	}
+
+	updateErr := errors.New("db update error")
+	repo.updateErr = updateErr
+
+	err := svc.SyncBlockTransactionReceipts(context.Background(), tx.BlockNumber)
+	if !errors.Is(err, updateErr) {
+		t.Fatalf("expected update error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "service: update transaction receipt for tx") {
+		t.Fatalf("expected wrapped update error, got %v", err)
+	}
+
+	if len(repo.updateCalls) != 1 {
+		t.Fatalf("expected 1 update call, got %d", len(repo.updateCalls))
 	}
 }

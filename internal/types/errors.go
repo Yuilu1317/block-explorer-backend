@@ -7,9 +7,12 @@ var (
 	ErrInvalidBlockNumber = errors.New("invalid block number")
 	ErrInvalidAddress     = errors.New("invalid address")
 	ErrInvalidBlockRange  = errors.New("invalid block range")
+	ErrInvalidPagination  = errors.New("invalid pagination")
 
-	ErrBlockNotFound      = errors.New("block not found")
-	ErrTxNotFound         = errors.New("transaction not found")
+	ErrBlockNotFound     = errors.New("block not found")
+	ErrTxNotFound        = errors.New("transaction not found")
+	ErrTxReceiptNotFound = errors.New("transaction receipt not found")
+
 	ErrReorgDetected      = errors.New("reorg detected")
 	ErrChainDiscontinuity = errors.New("chain discontinuity detected")
 
@@ -19,6 +22,4 @@ var (
 	ErrDBTimeout  = errors.New("db timeout")
 
 	ErrRequestCanceled = errors.New("request canceled")
-
-	ErrInvalidPagination = errors.New("invalid pagination")
 )

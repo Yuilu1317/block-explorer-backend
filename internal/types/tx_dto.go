@@ -11,8 +11,8 @@ type TxDetailDTO struct {
 	Data        string  `json:"data"`
 	IsPending   bool    `json:"is_pending"`
 	BlockNumber *uint64 `json:"block_number,omitempty"`
-	Status      *uint64 `json:"status,omitempty"`
-	GasUsed     *uint64 `json:"gas_used,omitempty"`
+	Status      *uint64 `json:"status"`
+	GasUsed     *uint64 `json:"gas_used"`
 }
 
 type IndexedTransactionDTO struct {
@@ -23,6 +23,9 @@ type IndexedTransactionDTO struct {
 
 	FromAddress string `json:"from_address"`
 	ToAddress   string `json:"to_address"`
+
+	Status  *uint64 `json:"status"`
+	GasUsed *uint64 `json:"gas_used"`
 
 	Nonce       uint64 `json:"nonce"`
 	ValueWei    string `json:"value_wei"`

@@ -16,6 +16,9 @@ type AddressTransactionDTO struct {
 	FromAddress string `json:"from_address"`
 	ToAddress   string `json:"to_address"`
 
+	Status  *uint64 `json:"status"`
+	GasUsed *uint64 `json:"gas_used"`
+
 	Direction           string `json:"direction"`
 	CounterpartyAddress string `json:"counterparty_address"`
 

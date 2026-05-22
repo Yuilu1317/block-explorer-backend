@@ -2,6 +2,7 @@ package repo
 
 import (
 	"block-explorer-backend/internal/db/models"
+	"block-explorer-backend/internal/types"
 	"context"
 	"errors"
 	"fmt"
@@ -86,5 +87,44 @@ func (r *TransactionRepository) ListTransactionsByAddress(
 		}
 		return nil, fmt.Errorf("list transactions by address %s: %w", address, err)
 	}
+	return txs, nil
+}
+
+func (r *TransactionRepository) UpdateTransactionReceiptByHash(
+	ctx context.Context,
+	hash string,
+	status *uint64,
+	gasUsed *uint64,
+) error {
+	result := r.db.WithContext(ctx).Model(&models.Transaction{}).Where("hash = ?", hash).Updates(map[string]any{
+		"receipt_status":   status,
+		"receipt_gas_used": gasUsed,
+	})
+	if result.Error != nil {
+		return result.Error
+	}
+
+	if result.RowsAffected == 0 {
+		return types.ErrTxNotFound
+	}
+	return nil
+}
+
+func (r *TransactionRepository) ListTransactionsMissingReceiptByBlockNumber(
+	ctx context.Context,
+	blockNumber uint64,
+) ([]*models.Transaction, error) {
+	txs := make([]*models.Transaction, 0)
+
+	result := r.db.WithContext(ctx).
+		Model(&models.Transaction{}).
+		Where("block_number = ? AND (receipt_status IS NULL OR receipt_gas_used IS NULL)", blockNumber).
+		Order("tx_index ASC").
+		Find(&txs)
+
+	if result.Error != nil {
+		return nil, result.Error
+	}
+
 	return txs, nil
 }
