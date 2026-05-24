@@ -13,4 +13,4 @@ indexer:
   interval_seconds: 2
   run_timeout_seconds: 3
   sync_target: safe
-  start_block: 0
+  start_block: 46147

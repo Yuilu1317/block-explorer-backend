@@ -36,17 +36,21 @@ type BlockService struct {
 	blockRPC                 BlockRPC
 	blockRepo                BlockRepository
 	transactionReceiptSyncer TransactionReceiptSyncer
+
+	startBlock uint64
 }
 
 func NewBlockService(
 	blockRPC BlockRPC,
 	blockRepo BlockRepository,
 	transactionReceiptSyncer TransactionReceiptSyncer,
+	startBlock uint64,
 ) *BlockService {
 	return &BlockService{
 		blockRPC:                 blockRPC,
 		blockRepo:                blockRepo,
 		transactionReceiptSyncer: transactionReceiptSyncer,
+		startBlock:               startBlock,
 	}
 }
 
@@ -100,7 +104,19 @@ func (s *BlockService) validateBlockForSync(ctx context.Context, blockModel *mod
 		if err != nil {
 			return fmt.Errorf("query parent block %d from db: %w", blockModel.Number-1, err)
 		}
-		if found && !strings.EqualFold(blockModel.ParentHash, parentBlock.Hash) {
+
+		if !found {
+			if blockModel.Number == s.startBlock {
+				return nil
+			}
+			return fmt.Errorf(
+				"parent block %d missing for block %d: %w",
+				blockModel.Number-1,
+				blockModel.Number,
+				types.ErrChainDiscontinuity,
+			)
+		}
+		if !strings.EqualFold(blockModel.ParentHash, parentBlock.Hash) {
 			return fmt.Errorf(
 				"chain discontinuity at block %d: rpc_parent_hash=%s db_parent_hash=%s: %w",
 				blockModel.Number,

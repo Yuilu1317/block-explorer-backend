@@ -110,11 +110,15 @@ func (f *fakeBlockRepo) GetBlockByNumber(ctx context.Context, number uint64) (*m
 	}
 
 	if f.blocks != nil {
-		block, found := f.blocks[number]
-		if found {
+		if block, found := f.blocks[number]; found {
 			return block, true, nil
 		}
-		return block, found, nil
+	}
+
+	if f.insertedBlocks != nil {
+		if block, found := f.insertedBlocks[number]; found {
+			return block, true, nil
+		}
 	}
 
 	if f.found && f.block != nil && f.block.Number == number {
@@ -202,12 +206,20 @@ func assertInsertedBlockSyncState(
 
 func setupTestService(t *testing.T) (*BlockService, *fakeBlockRepo, *fakeBlockRPC) {
 	t.Helper()
+	return setupTestServiceWithStartBlock(t, 20)
+}
+
+func setupTestServiceWithStartBlock(
+	t *testing.T,
+	startBlock uint64,
+) (*BlockService, *fakeBlockRepo, *fakeBlockRPC) {
+	t.Helper()
 
 	rpc := &fakeBlockRPC{}
 	r := &fakeBlockRepo{}
 	receiptSyncer := &fakeTransactionReceiptSyncer{}
 
-	svc := NewBlockService(rpc, r, receiptSyncer)
+	svc := NewBlockService(rpc, r, receiptSyncer, startBlock)
 
 	return svc, r, rpc
 }
@@ -216,12 +228,20 @@ func setupTestServiceWithReceiptSyncer(
 	t *testing.T,
 ) (*BlockService, *fakeBlockRepo, *fakeBlockRPC, *fakeTransactionReceiptSyncer) {
 	t.Helper()
+	return setupTestServiceWithReceiptSyncerAndStartBlock(t, 20)
+}
+
+func setupTestServiceWithReceiptSyncerAndStartBlock(
+	t *testing.T,
+	startBlock uint64,
+) (*BlockService, *fakeBlockRepo, *fakeBlockRPC, *fakeTransactionReceiptSyncer) {
+	t.Helper()
 
 	rpc := &fakeBlockRPC{}
 	r := &fakeBlockRepo{}
 	receiptSyncer := &fakeTransactionReceiptSyncer{}
 
-	svc := NewBlockService(rpc, r, receiptSyncer)
+	svc := NewBlockService(rpc, r, receiptSyncer, startBlock)
 
 	return svc, r, rpc, receiptSyncer
 }
@@ -653,7 +673,7 @@ func TestBlockService_SyncBlockToDB_InsertsBlockWhenParentHashMatches(t *testing
 }
 
 func TestBlockService_SyncBlockToDB_AllowsSyncFromLocalStartBlockWhenParentIsMissing(t *testing.T) {
-	svc, repo, rpc := setupTestService(t)
+	svc, repo, rpc := setupTestServiceWithStartBlock(t, 100)
 	rpc.block = ethtypes.NewBlockWithHeader(&ethtypes.Header{
 		Number:     big.NewInt(100),
 		ParentHash: common.HexToHash("0xaaa"),
@@ -678,6 +698,29 @@ func TestBlockService_SyncBlockToDB_AllowsSyncFromLocalStartBlockWhenParentIsMis
 
 	if len(repo.insertTxsArg) != 0 {
 		t.Fatalf("expected 0 transactions, got %d", len(repo.insertTxsArg))
+	}
+}
+
+func TestBlockService_SyncBlockToDB_ReturnsErrChainDiscontinuityWhenParentMissingAfterStartBlock(t *testing.T) {
+	svc, repo, rpc := setupTestServiceWithStartBlock(t, 100)
+
+	rpc.block = ethtypes.NewBlockWithHeader(&ethtypes.Header{
+		Number:     big.NewInt(101),
+		ParentHash: common.HexToHash("0xaaa"),
+	})
+	repo.blocks = map[uint64]*models.Block{}
+
+	err := svc.SyncBlockToDB(context.Background(), 101)
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+
+	if !errors.Is(err, types.ErrChainDiscontinuity) {
+		t.Fatalf("expected ErrChainDiscontinuity, got %v", err)
+	}
+
+	if repo.insertBlockWithTransactionsCalled {
+		t.Fatalf("expected InsertBlockWithTransactions not to be called")
 	}
 }
 
@@ -706,14 +749,31 @@ func TestBlockService_SyncBlockToDB_ReturnsErrChainDiscontinuityWhenParentHashMi
 	}
 }
 
-func TestBlockService_SyncBlockRangeToDB_AllSuccess(t *testing.T) {
-	svc, repo, rpc := setupTestService(t)
+func newLinkedTestBlocks(numbers ...uint64) map[uint64]*ethtypes.Block {
+	blocks := make(map[uint64]*ethtypes.Block, len(numbers))
 
-	rpc.blocks = map[uint64]*ethtypes.Block{
-		10: ethtypes.NewBlockWithHeader(&ethtypes.Header{Number: big.NewInt(10)}),
-		11: ethtypes.NewBlockWithHeader(&ethtypes.Header{Number: big.NewInt(11)}),
-		12: ethtypes.NewBlockWithHeader(&ethtypes.Header{Number: big.NewInt(12)}),
+	var parentHash common.Hash
+	for i, number := range numbers {
+		header := &ethtypes.Header{
+			Number: big.NewInt(int64(number)),
+		}
+
+		if i > 0 {
+			header.ParentHash = parentHash
+		}
+
+		block := ethtypes.NewBlockWithHeader(header)
+		blocks[number] = block
+		parentHash = block.Hash()
 	}
+
+	return blocks
+}
+
+func TestBlockService_SyncBlockRangeToDB_AllSuccess(t *testing.T) {
+	svc, repo, rpc := setupTestServiceWithStartBlock(t, 10)
+
+	rpc.blocks = newLinkedTestBlocks(10, 11, 12)
 
 	result, err := svc.SyncBlockRangeToDB(context.Background(), 10, 12)
 	switch {
@@ -764,13 +824,9 @@ func TestBlockService_SyncBlockRangeToDB_Canceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	svc, repo, rpc := setupTestService(t)
+	svc, repo, rpc := setupTestServiceWithStartBlock(t, 10)
 
-	rpc.blocks = map[uint64]*ethtypes.Block{
-		10: ethtypes.NewBlockWithHeader(&ethtypes.Header{Number: big.NewInt(10)}),
-		11: ethtypes.NewBlockWithHeader(&ethtypes.Header{Number: big.NewInt(11)}),
-		12: ethtypes.NewBlockWithHeader(&ethtypes.Header{Number: big.NewInt(12)}),
-	}
+	rpc.blocks = newLinkedTestBlocks(10, 11, 12)
 
 	rpc.onGetBlock = func(number uint64) {
 		if number == 11 {
@@ -793,31 +849,42 @@ func TestBlockService_SyncBlockRangeToDB_Canceled(t *testing.T) {
 	}
 }
 
-func TestBlockService_SyncBlockRangeToDB_PartialFailure(t *testing.T) {
-	svc, repo, rpc := setupTestService(t)
+func TestBlockService_SyncBlockRangeToDB_PartialFailureDoesNotCreateDiscontinuousChain(t *testing.T) {
+	svc, repo, rpc := setupTestServiceWithStartBlock(t, 10)
+
+	blocks := newLinkedTestBlocks(10, 11, 12)
 
 	rpc.blocks = map[uint64]*ethtypes.Block{
-		10: ethtypes.NewBlockWithHeader(&ethtypes.Header{Number: big.NewInt(10)}),
-		12: ethtypes.NewBlockWithHeader(&ethtypes.Header{Number: big.NewInt(12)}),
+		10: blocks[10],
+		12: blocks[12],
 	}
 	rpc.errs = map[uint64]error{
 		11: errors.New("some error"),
 	}
+
 	result, err := svc.SyncBlockRangeToDB(context.Background(), 10, 12)
-	if err != nil {
-		t.Fatalf("expected nil error, got %v", err)
+	if err == nil {
+		t.Fatalf("expected error, got nil")
 	}
-	if result.Succeeded != 2 {
-		t.Fatalf("expected succeeded=2, got %d", result.Succeeded)
+	if !errors.Is(err, types.ErrChainDiscontinuity) {
+		t.Fatalf("expected ErrChainDiscontinuity, got %v", err)
 	}
-	if result.Failed != 1 {
-		t.Fatalf("expected failed=1, got %d", result.Failed)
+
+	if result == nil {
+		t.Fatalf("expected result, got nil")
 	}
-	if len(result.FailedBlocks) != 1 || result.FailedBlocks[0] != 11 {
-		t.Fatalf("expected failed block 11, got %+v", result.FailedBlocks)
+
+	if result.Succeeded != 1 {
+		t.Fatalf("expected succeeded=1, got %d", result.Succeeded)
 	}
-	if len(repo.insertedBlocks) != 2 {
-		t.Fatalf("expected 2 inserted blocks, got %d", len(repo.insertedBlocks))
+	if result.Failed != 2 {
+		t.Fatalf("expected failed=2, got %d", result.Failed)
+	}
+	if len(result.FailedBlocks) != 2 || result.FailedBlocks[0] != 11 || result.FailedBlocks[1] != 12 {
+		t.Fatalf("expected failed blocks [11 12], got %+v", result.FailedBlocks)
+	}
+	if len(repo.insertedBlocks) != 1 {
+		t.Fatalf("expected 1 inserted block, got %d", len(repo.insertedBlocks))
 	}
 }
 
@@ -930,7 +997,7 @@ func TestBlockService_SyncBlockToDB_DoesNotSyncReceiptsWhenInsertBlockWithTransa
 	if receiptSyncer.calls != 0 {
 		t.Fatalf("expected 0 receipt sync calls, got %d", receiptSyncer.calls)
 	}
-	
+
 	if repo.markBlockReceiptsSyncedCalled {
 		t.Fatalf("expected MarkBlockReceiptsSynced not to be called")
 	}
