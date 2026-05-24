@@ -2,6 +2,7 @@ package repo
 
 import (
 	"block-explorer-backend/internal/db/models"
+	"block-explorer-backend/internal/types"
 	"context"
 	"database/sql"
 	"errors"
@@ -29,22 +30,27 @@ func (r *BlockRepository) InsertBlock(ctx context.Context, block *models.Block) 
 	return nil
 }
 
-func (r *BlockRepository) GetLatestBlockNumber(ctx context.Context) (uint64, bool, error) {
-	var latestNumber sql.NullInt64
+func (r *BlockRepository) GetLatestFullySyncedBlockNumber(ctx context.Context) (uint64, bool, error) {
+	var latestFullyNumber sql.NullInt64
 
-	err := r.db.WithContext(ctx).Model(&models.Block{}).Select("MAX(number)").Scan(&latestNumber).Error
+	err := r.db.WithContext(ctx).
+		Model(&models.Block{}).
+		Where("transactions_synced = ? AND receipts_synced = ?", true, true).
+		Select("MAX(number)").
+		Scan(&latestFullyNumber).
+		Error
 	if err != nil {
 		if mapped := mapDBError(err); mapped != nil {
 			return 0, false, mapped
 		}
-		return 0, false, fmt.Errorf("query latest block number: %w", err)
+		return 0, false, fmt.Errorf("query latest fully synced block number: %w", err)
 	}
 
-	if !latestNumber.Valid {
+	if !latestFullyNumber.Valid {
 		return 0, false, nil
 	}
 
-	return uint64(latestNumber.Int64), true, nil
+	return uint64(latestFullyNumber.Int64), true, nil
 }
 
 func (r *BlockRepository) GetBlockByNumber(ctx context.Context, number uint64) (*models.Block, bool, error) {
@@ -85,4 +91,49 @@ func (r *BlockRepository) InsertBlockWithTransactions(ctx context.Context, block
 
 		return nil
 	})
+}
+
+func (r *BlockRepository) MarkBlockReceiptsSynced(ctx context.Context, blockNumber uint64) error {
+	result := r.db.WithContext(ctx).
+		Model(&models.Block{}).
+		Where("number = ?", blockNumber).
+		Updates(map[string]any{
+			"receipts_synced": true,
+			"sync_status":     models.BlockSyncStatusCompleted,
+			"last_sync_error": nil,
+		})
+
+	if result.Error != nil {
+		if mapped := mapDBError(result.Error); mapped != nil {
+			return mapped
+		}
+		return fmt.Errorf("mark block %d receipts synced: %w", blockNumber, result.Error)
+	}
+
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("mark block %d receipts synced: %w", blockNumber, types.ErrBlockNotFound)
+	}
+
+	return nil
+}
+
+func (r *BlockRepository) MarkBlockReceiptsSyncFailed(ctx context.Context, blockNumber uint64, reason string) error {
+	result := r.db.WithContext(ctx).
+		Model(&models.Block{}).
+		Where("number = ?", blockNumber).
+		Updates(map[string]any{
+			"receipts_synced": false,
+			"sync_status":     models.BlockSyncStatusReceiptsFailed,
+			"last_sync_error": reason,
+		})
+	if result.Error != nil {
+		if mapped := mapDBError(result.Error); mapped != nil {
+			return mapped
+		}
+		return fmt.Errorf("mark block %d receipts sync failed: %w", blockNumber, result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("mark block %d receipts sync failed: %w", blockNumber, types.ErrBlockNotFound)
+	}
+	return nil
 }

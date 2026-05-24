@@ -11,7 +11,7 @@ type BlockRPC interface {
 }
 
 type BlockRepository interface {
-	GetLatestBlockNumber(ctx context.Context) (uint64, bool, error)
+	GetLatestFullySyncedBlockNumber(ctx context.Context) (uint64, bool, error)
 }
 
 type BlockService interface {
@@ -43,12 +43,7 @@ func NewBlockIndexer(
 }
 
 func (s *BlockIndexer) GetNextBlockToSync(ctx context.Context) (*types.IndexerStatus, error) {
-	// TODO: replace GetLatestBlockNumber with a persistent sync_state cursor.
-	// The current logic uses MAX(block.number) as the indexer progress.
-	// This works only when blocks are synced continuously.
-	// If a far block is manually synced for debugging or backfill,
-	// MAX(block.number) may jump ahead and no longer represent the latest contiguous synced height.
-	dbLatest, exists, err := s.blockRepo.GetLatestBlockNumber(ctx)
+	dbLatest, exists, err := s.blockRepo.GetLatestFullySyncedBlockNumber(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("db latest block: %w", err)
 	}

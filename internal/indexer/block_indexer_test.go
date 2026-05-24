@@ -29,7 +29,7 @@ type fakeBlockRepository struct {
 	getLatestCalled bool
 }
 
-func (f *fakeBlockRepository) GetLatestBlockNumber(ctx context.Context) (uint64, bool, error) {
+func (f *fakeBlockRepository) GetLatestFullySyncedBlockNumber(ctx context.Context) (uint64, bool, error) {
 	f.getLatestCalled = true
 	return f.latestNumber, f.exists, f.err
 }
@@ -333,5 +333,47 @@ func TestBlockIndexer_GetNextBlockToSync_UsesSyncTarget(t *testing.T) {
 
 	if result.RPCTarget != rpc.targetNumber {
 		t.Fatalf("expected RPCTarget=%d, got %d", rpc.targetNumber, result.RPCTarget)
+	}
+}
+
+func TestBlockIndexer_GetNextBlockToSync_UsesLatestFullySyncedBlockAsCursor(t *testing.T) {
+	indexer, rpc, repo, _ := setupTestIndexer(t)
+	ctx := context.Background()
+
+	repo.latestNumber = 99
+	repo.exists = true
+	rpc.targetNumber = 105
+
+	result, err := indexer.GetNextBlockToSync(ctx)
+	if err != nil {
+		t.Fatalf("GetNextBlockToSync(): %v", err)
+	}
+
+	if !repo.getLatestCalled {
+		t.Fatalf("expected GetLatestFullySyncedBlockNumber to be called")
+	}
+
+	if !rpc.getTargetCalled {
+		t.Fatalf("expected RPC target to be called")
+	}
+
+	if result.DBLatest == nil {
+		t.Fatalf("expected DBLatest=%d, got nil", repo.latestNumber)
+	}
+
+	if *result.DBLatest != 99 {
+		t.Fatalf("expected DBLatest=99, got %d", *result.DBLatest)
+	}
+
+	if result.RPCTarget != 105 {
+		t.Fatalf("expected RPCTarget=105, got %d", result.RPCTarget)
+	}
+
+	if result.Next != 100 {
+		t.Fatalf("expected Next=100, got %d", result.Next)
+	}
+
+	if !result.ShouldSync {
+		t.Fatalf("expected ShouldSync=true")
 	}
 }

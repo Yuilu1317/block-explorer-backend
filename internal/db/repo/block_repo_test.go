@@ -2,7 +2,9 @@ package repo
 
 import (
 	"block-explorer-backend/internal/db/models"
+	"block-explorer-backend/internal/types"
 	"context"
+	"errors"
 	"testing"
 
 	"gorm.io/gorm"
@@ -83,11 +85,11 @@ func TestBlockRepository_InsertBlock_DBError(t *testing.T) {
 	}
 }
 
-func TestBlockRepository_GetLatestBlockNumber_EmptyTable(t *testing.T) {
+func TestBlockRepository_GetLatestFullySyncedBlockNumber_EmptyTable(t *testing.T) {
 	db := SetupTestDB(t)
 	r := NewBlockRepository(db)
 
-	number, found, err := r.GetLatestBlockNumber(context.Background())
+	number, found, err := r.GetLatestFullySyncedBlockNumber(context.Background())
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
@@ -99,19 +101,22 @@ func TestBlockRepository_GetLatestBlockNumber_EmptyTable(t *testing.T) {
 	}
 }
 
-func TestBlockRepository_GetLatestBlockNumber_WithBlocks(t *testing.T) {
+func TestBlockRepository_GetLatestFullySyncedBlockNumber_WithBlocks(t *testing.T) {
 	db := SetupTestDB(t)
 	r := NewBlockRepository(db)
 
 	err := db.Create(&models.Block{
-		Number: 25,
-		Hash:   "0xabc",
+		Number:             25,
+		Hash:               "0xabc",
+		TransactionsSynced: true,
+		ReceiptsSynced:     true,
+		SyncStatus:         models.BlockSyncStatusCompleted,
 	}).Error
 	if err != nil {
 		t.Fatalf("seed block: %v", err)
 	}
 
-	number, found, err := r.GetLatestBlockNumber(context.Background())
+	number, found, err := r.GetLatestFullySyncedBlockNumber(context.Background())
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
@@ -123,28 +128,73 @@ func TestBlockRepository_GetLatestBlockNumber_WithBlocks(t *testing.T) {
 	}
 }
 
-func TestBlockRepository_GetLatestBlockNumber_MultipleBlocks(t *testing.T) {
+func TestBlockRepository_GetLatestFullySyncedBlockNumber_IgnoresHigherPartiallySyncedBlock(t *testing.T) {
 	db := SetupTestDB(t)
 	r := NewBlockRepository(db)
 
 	err := db.Create(&[]models.Block{
-		{Number: 40, Hash: "0xzxc"},
-		{Number: 30, Hash: "0xdef"},
-		{Number: 50, Hash: "0xghi"},
+		{
+			Number:             40,
+			Hash:               "0xzxc",
+			TransactionsSynced: true,
+			ReceiptsSynced:     true,
+			SyncStatus:         models.BlockSyncStatusCompleted,
+		},
+		{
+			Number:             50,
+			Hash:               "0xghi",
+			TransactionsSynced: true,
+			ReceiptsSynced:     false,
+			SyncStatus:         models.BlockSyncStatusReceiptsFailed,
+		},
+		{
+			Number:             30,
+			Hash:               "0xdef",
+			TransactionsSynced: true,
+			ReceiptsSynced:     true,
+			SyncStatus:         models.BlockSyncStatusCompleted,
+		},
 	}).Error
 	if err != nil {
 		t.Fatalf("seed block: %v", err)
 	}
 
-	number, found, err := r.GetLatestBlockNumber(context.Background())
+	number, found, err := r.GetLatestFullySyncedBlockNumber(context.Background())
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
 	if !found {
 		t.Fatalf("expected found=true, got false")
 	}
-	if number != 50 {
-		t.Fatalf("expected number=50, got %d", number)
+	if number != 40 {
+		t.Fatalf("expected number=40, got %d", number)
+	}
+}
+
+func TestBlockRepository_GetLatestFullySyncedBlockNumber_ExcludesPartiallySyncedBlock(t *testing.T) {
+	db := SetupTestDB(t)
+	r := NewBlockRepository(db)
+
+	err := db.Create(&models.Block{
+		Number:             25,
+		Hash:               "0xabc",
+		TransactionsSynced: true,
+		ReceiptsSynced:     false,
+		SyncStatus:         models.BlockSyncStatusReceiptsFailed,
+	}).Error
+	if err != nil {
+		t.Fatalf("seed block: %v", err)
+	}
+
+	number, found, err := r.GetLatestFullySyncedBlockNumber(context.Background())
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	if found {
+		t.Fatalf("expected found=false, got true")
+	}
+	if number != 0 {
+		t.Fatalf("expected number=0, got %d", number)
 	}
 }
 
@@ -212,6 +262,10 @@ func newBlockWithTxTestBlock(number uint64, hash string) *models.Block {
 		GasLimit:   30000000,
 		GasUsed:    21000,
 		TxCount:    3,
+
+		TransactionsSynced: true,
+		ReceiptsSynced:     false,
+		SyncStatus:         models.BlockSyncStatusTransactionsSynced,
 	}
 }
 
@@ -258,6 +312,41 @@ func TestBlockRepository_InsertBlockWithTransactions_Success(t *testing.T) {
 	}
 	if txCount != 3 {
 		t.Fatalf("expected 3 transactions, got %d", txCount)
+	}
+
+	var savedBlock models.Block
+	if err := db.Where("number = ?", block.Number).First(&savedBlock).Error; err != nil {
+		t.Fatalf("find saved block: %v", err)
+	}
+
+	if !savedBlock.TransactionsSynced {
+		t.Fatalf("expected transactions_synced=true")
+	}
+	if savedBlock.ReceiptsSynced {
+		t.Fatalf("expected receipts_synced=false before receipt sync")
+	}
+	if savedBlock.SyncStatus != models.BlockSyncStatusTransactionsSynced {
+		t.Fatalf("expected sync_status=%s, got %s",
+			models.BlockSyncStatusTransactionsSynced,
+			savedBlock.SyncStatus,
+		)
+	}
+	if savedBlock.LastSyncError != nil {
+		t.Fatalf("expected last_sync_error=nil, got %v", *savedBlock.LastSyncError)
+	}
+
+	for _, tx := range txs {
+		var savedTx models.Transaction
+		if err := db.Where("hash = ?", tx.Hash).First(&savedTx).Error; err != nil {
+			t.Fatalf("find saved tx %s: %v", tx.Hash, err)
+		}
+
+		if savedTx.ReceiptStatus != nil {
+			t.Fatalf("expected receipt_status=nil before receipt sync, got %v", *savedTx.ReceiptStatus)
+		}
+		if savedTx.ReceiptGasUsed != nil {
+			t.Fatalf("expected receipt_gas_used=nil before receipt sync, got %v", *savedTx.ReceiptGasUsed)
+		}
 	}
 }
 
@@ -343,6 +432,151 @@ func TestBlockRepository_InsertBlockWithTransactions_DBError(t *testing.T) {
 	}
 
 	err = r.InsertBlockWithTransactions(ctx, block, txs)
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+}
+
+func stringPtr(s string) *string {
+	return &s
+}
+
+func TestBlockRepository_MarkBlockReceiptsSynced_Success(t *testing.T) {
+	r, db := setupBlockWithTransactionsRepo(t)
+	ctx := context.Background()
+
+	block := newBlockWithTxTestBlock(100, "0xblockhash100")
+	block.ReceiptsSynced = false
+	block.SyncStatus = models.BlockSyncStatusReceiptsFailed
+	block.LastSyncError = stringPtr("previous receipt sync error")
+
+	if err := db.Create(block).Error; err != nil {
+		t.Fatalf("seed block: %v", err)
+	}
+
+	if err := r.MarkBlockReceiptsSynced(ctx, 100); err != nil {
+		t.Fatalf("mark block receipts synced: %v", err)
+	}
+
+	var savedBlock models.Block
+	if err := db.Where("number = ?", 100).First(&savedBlock).Error; err != nil {
+		t.Fatalf("find saved block: %v", err)
+	}
+
+	if !savedBlock.TransactionsSynced {
+		t.Fatalf("expected transactions_synced=true")
+	}
+	if !savedBlock.ReceiptsSynced {
+		t.Fatalf("expected receipts_synced=true")
+	}
+	if savedBlock.SyncStatus != models.BlockSyncStatusCompleted {
+		t.Fatalf("expected sync_status=%s, got %s",
+			models.BlockSyncStatusCompleted,
+			savedBlock.SyncStatus,
+		)
+	}
+	if savedBlock.LastSyncError != nil {
+		t.Fatalf("expected last_sync_error=nil, got %v", *savedBlock.LastSyncError)
+	}
+}
+
+func TestBlockRepository_MarkBlockReceiptsSynced_NotFound(t *testing.T) {
+	r, _ := setupBlockWithTransactionsRepo(t)
+	ctx := context.Background()
+
+	err := r.MarkBlockReceiptsSynced(ctx, 999)
+	if !errors.Is(err, types.ErrBlockNotFound) {
+		t.Fatalf("expected ErrBlockNotFound, got %v", err)
+	}
+}
+
+func TestBlockRepository_MarkBlockReceiptsSynced_DBError(t *testing.T) {
+	r, db := setupBlockWithTransactionsRepo(t)
+	ctx := context.Background()
+
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("get sql db: %v", err)
+	}
+
+	if err := sqlDB.Close(); err != nil {
+		t.Fatalf("close db: %v", err)
+	}
+
+	err = r.MarkBlockReceiptsSynced(ctx, 100)
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+}
+
+func TestBlockRepository_MarkBlockReceiptsSyncFailed_Success(t *testing.T) {
+	r, db := setupBlockWithTransactionsRepo(t)
+	ctx := context.Background()
+
+	block := newBlockWithTxTestBlock(100, "0xblockhash100")
+	block.ReceiptsSynced = false
+	block.SyncStatus = models.BlockSyncStatusTransactionsSynced
+	block.LastSyncError = stringPtr("old receipt error")
+
+	if err := db.Create(block).Error; err != nil {
+		t.Fatalf("seed block: %v", err)
+	}
+
+	reason := "get receipt: context deadline exceeded"
+
+	if err := r.MarkBlockReceiptsSyncFailed(ctx, 100, reason); err != nil {
+		t.Fatalf("mark block receipts sync failed: %v", err)
+	}
+
+	var savedBlock models.Block
+	if err := db.Where("number = ?", 100).First(&savedBlock).Error; err != nil {
+		t.Fatalf("find saved block: %v", err)
+	}
+
+	if !savedBlock.TransactionsSynced {
+		t.Fatalf("expected transactions_synced=true")
+	}
+	if savedBlock.ReceiptsSynced {
+		t.Fatalf("expected receipts_synced=false")
+	}
+	if savedBlock.SyncStatus != models.BlockSyncStatusReceiptsFailed {
+		t.Fatalf("expected sync_status=%s, got %s",
+			models.BlockSyncStatusReceiptsFailed,
+			savedBlock.SyncStatus,
+		)
+	}
+	if savedBlock.LastSyncError == nil {
+		t.Fatalf("expected last_sync_error to be set")
+	}
+	if *savedBlock.LastSyncError != reason {
+		t.Fatalf("expected last_sync_error=%q, got %q", reason, *savedBlock.LastSyncError)
+	}
+}
+
+func TestBlockRepository_MarkBlockReceiptsSyncFailed_NotFound(t *testing.T) {
+	r, _ := setupBlockWithTransactionsRepo(t)
+	ctx := context.Background()
+
+	err := r.MarkBlockReceiptsSyncFailed(ctx, 999, "receipt sync failed")
+	if !errors.Is(err, types.ErrBlockNotFound) {
+		t.Fatalf("expected ErrBlockNotFound, got %v", err)
+	}
+}
+
+func TestBlockRepository_MarkBlockReceiptsSyncFailed_DBError(t *testing.T) {
+	r, db := setupBlockWithTransactionsRepo(t)
+	ctx := context.Background()
+
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("get sql db: %v", err)
+	}
+
+	if err := sqlDB.Close(); err != nil {
+		t.Fatalf("close db: %v", err)
+	}
+
+	err = r.MarkBlockReceiptsSyncFailed(ctx, 100, "receipt sync failed")
 	if err == nil {
 		t.Fatalf("expected error, got nil")
 	}

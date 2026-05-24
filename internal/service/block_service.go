@@ -20,12 +20,14 @@ type BlockRPC interface {
 	GetChainID(ctx context.Context) (*big.Int, error)
 }
 
-// BlockRepository call interface
 type BlockRepository interface {
 	GetBlockByNumber(ctx context.Context, number uint64) (*models.Block, bool, error)
 	InsertBlockWithTransactions(ctx context.Context, block *models.Block, txs []*models.Transaction) error
+	MarkBlockReceiptsSynced(ctx context.Context, blockNumber uint64) error
+	MarkBlockReceiptsSyncFailed(ctx context.Context, blockNumber uint64, reason string) error
 }
 
+// TransactionReceiptSyncer is the interface used by TxService to sync block transaction receipts.
 type TransactionReceiptSyncer interface {
 	SyncBlockTransactionReceipts(ctx context.Context, blockNumber uint64) error
 }
@@ -154,14 +156,37 @@ func (s *BlockService) SyncBlockToDB(ctx context.Context, number uint64) error {
 		return err
 	}
 
+	blockModel.TransactionsSynced = true
+	if len(txModels) == 0 {
+		blockModel.ReceiptsSynced = true
+		blockModel.SyncStatus = models.BlockSyncStatusCompleted
+	} else {
+		blockModel.ReceiptsSynced = false
+		blockModel.SyncStatus = models.BlockSyncStatusTransactionsSynced
+	}
+
 	if err := s.blockRepo.InsertBlockWithTransactions(ctx, blockModel, txModels); err != nil {
 		return fmt.Errorf("insert block %d into db: %w", number, err)
 	}
 
-	if err := s.transactionReceiptSyncer.SyncBlockTransactionReceipts(ctx, number); err != nil {
-		return fmt.Errorf("sync transaction receipts for block %d: %w", number, err)
+	if len(txModels) == 0 {
+		return nil
 	}
 
+	if err := s.transactionReceiptSyncer.SyncBlockTransactionReceipts(ctx, number); err != nil {
+		if markErr := s.blockRepo.MarkBlockReceiptsSyncFailed(ctx, number, err.Error()); markErr != nil {
+			return fmt.Errorf(
+				"sync receipts for block %d failed: %w; additionally failed to mark receipts sync failed: %v",
+				number,
+				err,
+				markErr,
+			)
+		}
+		return fmt.Errorf("sync receipts for block %d: %w", number, err)
+	}
+	if err := s.blockRepo.MarkBlockReceiptsSynced(ctx, number); err != nil {
+		return fmt.Errorf("mark block %d receipts synced: %w", number, err)
+	}
 	return nil
 }
 

@@ -72,6 +72,15 @@ type fakeBlockRepo struct {
 	insertTxsArg                      []*models.Transaction
 	insertBlockWithTransactionsErr    error
 	insertedBlocks                    map[uint64]*models.Block
+
+	markBlockReceiptsSyncedCalled      bool
+	markBlockReceiptsSyncedBlockNumber uint64
+	markBlockReceiptsSyncedErr         error
+
+	markBlockReceiptsSyncFailedCalled      bool
+	markBlockReceiptsSyncFailedBlockNumber uint64
+	markBlockReceiptsSyncFailedReason      string
+	markBlockReceiptsSyncFailedErr         error
 }
 
 func (f *fakeBlockRepo) InsertBlockWithTransactions(
@@ -114,6 +123,29 @@ func (f *fakeBlockRepo) GetBlockByNumber(ctx context.Context, number uint64) (*m
 	return nil, false, nil
 }
 
+func (f *fakeBlockRepo) MarkBlockReceiptsSynced(ctx context.Context, blockNumber uint64) error {
+	f.markBlockReceiptsSyncedCalled = true
+	f.markBlockReceiptsSyncedBlockNumber = blockNumber
+
+	if f.markBlockReceiptsSyncedErr != nil {
+		return f.markBlockReceiptsSyncedErr
+	}
+
+	return nil
+}
+
+func (f *fakeBlockRepo) MarkBlockReceiptsSyncFailed(ctx context.Context, blockNumber uint64, reason string) error {
+	f.markBlockReceiptsSyncFailedCalled = true
+	f.markBlockReceiptsSyncFailedBlockNumber = blockNumber
+	f.markBlockReceiptsSyncFailedReason = reason
+
+	if f.markBlockReceiptsSyncFailedErr != nil {
+		return f.markBlockReceiptsSyncFailedErr
+	}
+
+	return nil
+}
+
 type fakeTransactionReceiptSyncer struct {
 	called         bool
 	calls          int
@@ -131,6 +163,41 @@ func (f *fakeTransactionReceiptSyncer) SyncBlockTransactionReceipts(ctx context.
 	}
 
 	return nil
+}
+
+func assertInsertedBlockSyncState(
+	t *testing.T,
+	block *models.Block,
+	wantTransactionsSynced bool,
+	wantReceiptsSynced bool,
+	wantSyncStatus string,
+) {
+	t.Helper()
+
+	if block == nil {
+		t.Fatalf("expected inserted block, got nil")
+	}
+
+	if block.TransactionsSynced != wantTransactionsSynced {
+		t.Fatalf("expected transactions_synced=%v, got %v",
+			wantTransactionsSynced,
+			block.TransactionsSynced,
+		)
+	}
+
+	if block.ReceiptsSynced != wantReceiptsSynced {
+		t.Fatalf("expected receipts_synced=%v, got %v",
+			wantReceiptsSynced,
+			block.ReceiptsSynced,
+		)
+	}
+
+	if block.SyncStatus != wantSyncStatus {
+		t.Fatalf("expected sync_status=%s, got %s",
+			wantSyncStatus,
+			block.SyncStatus,
+		)
+	}
 }
 
 func setupTestService(t *testing.T) (*BlockService, *fakeBlockRepo, *fakeBlockRPC) {
@@ -863,9 +930,17 @@ func TestBlockService_SyncBlockToDB_DoesNotSyncReceiptsWhenInsertBlockWithTransa
 	if receiptSyncer.calls != 0 {
 		t.Fatalf("expected 0 receipt sync calls, got %d", receiptSyncer.calls)
 	}
+	
+	if repo.markBlockReceiptsSyncedCalled {
+		t.Fatalf("expected MarkBlockReceiptsSynced not to be called")
+	}
+
+	if repo.markBlockReceiptsSyncFailedCalled {
+		t.Fatalf("expected MarkBlockReceiptsSyncFailed not to be called")
+	}
 }
 
-func TestBlockService_SyncBlockToDB_EmptyBlock_CallsReceiptSyncer(t *testing.T) {
+func TestBlockService_SyncBlockToDB_EmptyBlock_CompletesWithoutReceiptSync(t *testing.T) {
 	svc, repo, rpc, receiptSyncer := setupTestServiceWithReceiptSyncer(t)
 
 	rpc.block = ethtypes.NewBlockWithHeader(&ethtypes.Header{
@@ -894,24 +969,36 @@ func TestBlockService_SyncBlockToDB_EmptyBlock_CallsReceiptSyncer(t *testing.T) 
 		t.Fatalf("expected 0 transactions, got %d", len(repo.insertTxsArg))
 	}
 
+	assertInsertedBlockSyncState(
+		t,
+		repo.insertBlockArg,
+		true,
+		true,
+		models.BlockSyncStatusCompleted,
+	)
+
 	if rpc.getChainIDCalled {
 		t.Fatalf("expected GetChainID not to be called for empty block")
 	}
 
-	if !receiptSyncer.called {
-		t.Fatalf("expected SyncBlockTransactionReceipts to be called")
+	if receiptSyncer.called {
+		t.Fatalf("expected SyncBlockTransactionReceipts not to be called for empty block")
 	}
 
-	if receiptSyncer.calls != 1 {
-		t.Fatalf("expected 1 receipt sync call, got %d", receiptSyncer.calls)
+	if receiptSyncer.calls != 0 {
+		t.Fatalf("expected 0 receipt sync calls, got %d", receiptSyncer.calls)
 	}
 
-	if receiptSyncer.gotBlockNumber != 20 {
-		t.Fatalf("expected receipt sync block number=20, got %d", receiptSyncer.gotBlockNumber)
+	if repo.markBlockReceiptsSyncedCalled {
+		t.Fatalf("expected MarkBlockReceiptsSynced not to be called for empty block")
+	}
+
+	if repo.markBlockReceiptsSyncFailedCalled {
+		t.Fatalf("expected MarkBlockReceiptsSyncFailed not to be called for empty block")
 	}
 }
 
-func TestBlockService_SyncBlockToDB_WithTransactions_CallsReceiptSyncer(t *testing.T) {
+func TestBlockService_SyncBlockToDB_WithTransactions_SyncsReceiptsAndMarksCompleted(t *testing.T) {
 	svc, repo, rpc, receiptSyncer := setupTestServiceWithReceiptSyncer(t)
 
 	chainID := big.NewInt(1)
@@ -934,9 +1021,25 @@ func TestBlockService_SyncBlockToDB_WithTransactions_CallsReceiptSyncer(t *testi
 		t.Fatalf("expected InsertBlockWithTransactions to be called")
 	}
 
+	if repo.insertBlockArg == nil {
+		t.Fatalf("expected inserted block, got nil")
+	}
+
+	if repo.insertBlockArg.Number != 20 {
+		t.Fatalf("expected inserted block number=20, got %d", repo.insertBlockArg.Number)
+	}
+
 	if len(repo.insertTxsArg) != 1 {
 		t.Fatalf("expected 1 transaction, got %d", len(repo.insertTxsArg))
 	}
+
+	assertInsertedBlockSyncState(
+		t,
+		repo.insertBlockArg,
+		true,
+		false,
+		models.BlockSyncStatusTransactionsSynced,
+	)
 
 	if !receiptSyncer.called {
 		t.Fatalf("expected SyncBlockTransactionReceipts to be called")
@@ -949,13 +1052,33 @@ func TestBlockService_SyncBlockToDB_WithTransactions_CallsReceiptSyncer(t *testi
 	if receiptSyncer.gotBlockNumber != 20 {
 		t.Fatalf("expected receipt sync block number=20, got %d", receiptSyncer.gotBlockNumber)
 	}
+
+	if !repo.markBlockReceiptsSyncedCalled {
+		t.Fatalf("expected MarkBlockReceiptsSynced to be called")
+	}
+
+	if repo.markBlockReceiptsSyncedBlockNumber != 20 {
+		t.Fatalf("expected MarkBlockReceiptsSynced block number=20, got %d",
+			repo.markBlockReceiptsSyncedBlockNumber,
+		)
+	}
+
+	if repo.markBlockReceiptsSyncFailedCalled {
+		t.Fatalf("expected MarkBlockReceiptsSyncFailed not to be called")
+	}
 }
 
-func TestBlockService_SyncBlockToDB_ReturnsErrorWhenReceiptSyncFails(t *testing.T) {
+func TestBlockService_SyncBlockToDB_ReturnsErrorAndMarksFailedWhenReceiptSyncFails(t *testing.T) {
 	svc, repo, rpc, receiptSyncer := setupTestServiceWithReceiptSyncer(t)
 
-	rpc.block = ethtypes.NewBlockWithHeader(&ethtypes.Header{
-		Number: big.NewInt(20),
+	chainID := big.NewInt(1)
+	rpc.chainID = chainID
+
+	to := common.HexToAddress("0x2222222222222222222222222222222222222222")
+	signedTx, _ := newSignedTestTransaction(t, chainID, 1, to)
+
+	rpc.block = newTestBlockWithTransactions(20, []*ethtypes.Transaction{
+		signedTx,
 	})
 	rpc.err = nil
 
@@ -971,13 +1094,25 @@ func TestBlockService_SyncBlockToDB_ReturnsErrorWhenReceiptSyncFails(t *testing.
 		t.Fatalf("expected receipt sync error, got %v", err)
 	}
 
-	if !strings.Contains(err.Error(), "sync transaction receipts for block 20") {
-		t.Fatalf("expected wrapped receipt sync error, got %v", err)
+	if !strings.Contains(err.Error(), "receipt") {
+		t.Fatalf("expected wrapped receipt error, got %v", err)
+	}
+
+	if !strings.Contains(err.Error(), "block 20") {
+		t.Fatalf("expected error to include block number, got %v", err)
 	}
 
 	if !repo.insertBlockWithTransactionsCalled {
 		t.Fatalf("expected InsertBlockWithTransactions to be called")
 	}
+
+	assertInsertedBlockSyncState(
+		t,
+		repo.insertBlockArg,
+		true,
+		false,
+		models.BlockSyncStatusTransactionsSynced,
+	)
 
 	if !receiptSyncer.called {
 		t.Fatalf("expected SyncBlockTransactionReceipts to be called")
@@ -989,5 +1124,130 @@ func TestBlockService_SyncBlockToDB_ReturnsErrorWhenReceiptSyncFails(t *testing.
 
 	if receiptSyncer.gotBlockNumber != 20 {
 		t.Fatalf("expected receipt sync block number=20, got %d", receiptSyncer.gotBlockNumber)
+	}
+
+	if !repo.markBlockReceiptsSyncFailedCalled {
+		t.Fatalf("expected MarkBlockReceiptsSyncFailed to be called")
+	}
+
+	if repo.markBlockReceiptsSyncFailedBlockNumber != 20 {
+		t.Fatalf("expected MarkBlockReceiptsSyncFailed block number=20, got %d",
+			repo.markBlockReceiptsSyncFailedBlockNumber,
+		)
+	}
+
+	if repo.markBlockReceiptsSyncFailedReason != receiptErr.Error() {
+		t.Fatalf("expected failure reason=%q, got %q",
+			receiptErr.Error(),
+			repo.markBlockReceiptsSyncFailedReason,
+		)
+	}
+
+	if repo.markBlockReceiptsSyncedCalled {
+		t.Fatalf("expected MarkBlockReceiptsSynced not to be called")
+	}
+}
+
+func TestBlockService_SyncBlockToDB_ReturnsErrorWhenMarkBlockReceiptsSyncedFails(t *testing.T) {
+	svc, repo, rpc, receiptSyncer := setupTestServiceWithReceiptSyncer(t)
+
+	chainID := big.NewInt(1)
+	rpc.chainID = chainID
+
+	to := common.HexToAddress("0x2222222222222222222222222222222222222222")
+	signedTx, _ := newSignedTestTransaction(t, chainID, 1, to)
+
+	rpc.block = newTestBlockWithTransactions(20, []*ethtypes.Transaction{
+		signedTx,
+	})
+	rpc.err = nil
+
+	markErr := errors.New("mark receipts synced error")
+	repo.markBlockReceiptsSyncedErr = markErr
+
+	err := svc.SyncBlockToDB(context.Background(), 20)
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+
+	if !errors.Is(err, markErr) {
+		t.Fatalf("expected mark receipts synced error, got %v", err)
+	}
+
+	if !receiptSyncer.called {
+		t.Fatalf("expected SyncBlockTransactionReceipts to be called")
+	}
+
+	if receiptSyncer.calls != 1 {
+		t.Fatalf("expected 1 receipt sync call, got %d", receiptSyncer.calls)
+	}
+
+	if !repo.markBlockReceiptsSyncedCalled {
+		t.Fatalf("expected MarkBlockReceiptsSynced to be called")
+	}
+
+	if repo.markBlockReceiptsSyncedBlockNumber != 20 {
+		t.Fatalf("expected MarkBlockReceiptsSynced block number=20, got %d",
+			repo.markBlockReceiptsSyncedBlockNumber,
+		)
+	}
+
+	if repo.markBlockReceiptsSyncFailedCalled {
+		t.Fatalf("expected MarkBlockReceiptsSyncFailed not to be called")
+	}
+}
+
+func TestBlockService_SyncBlockToDB_ReturnsErrorWhenMarkBlockReceiptsSyncFailedFails(t *testing.T) {
+	svc, repo, rpc, receiptSyncer := setupTestServiceWithReceiptSyncer(t)
+
+	chainID := big.NewInt(1)
+	rpc.chainID = chainID
+
+	to := common.HexToAddress("0x2222222222222222222222222222222222222222")
+	signedTx, _ := newSignedTestTransaction(t, chainID, 1, to)
+
+	rpc.block = newTestBlockWithTransactions(20, []*ethtypes.Transaction{
+		signedTx,
+	})
+	rpc.err = nil
+
+	receiptErr := errors.New("receipt sync error")
+	markErr := errors.New("mark receipts sync failed error")
+
+	receiptSyncer.err = receiptErr
+	repo.markBlockReceiptsSyncFailedErr = markErr
+
+	err := svc.SyncBlockToDB(context.Background(), 20)
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+
+	if !errors.Is(err, receiptErr) {
+		t.Fatalf("expected original receipt sync error, got %v", err)
+	}
+
+	if !strings.Contains(err.Error(), markErr.Error()) {
+		t.Fatalf("expected error to include mark failure %q, got %v", markErr.Error(), err)
+	}
+
+	if !repo.markBlockReceiptsSyncFailedCalled {
+		t.Fatalf("expected MarkBlockReceiptsSyncFailed to be called")
+	}
+
+	if repo.markBlockReceiptsSyncFailedBlockNumber != 20 {
+		t.Fatalf("expected MarkBlockReceiptsSyncFailed block number=20, got %d",
+			repo.markBlockReceiptsSyncFailedBlockNumber,
+		)
+	}
+
+	if repo.markBlockReceiptsSyncFailedReason != receiptErr.Error() {
+		t.Fatalf("expected failure reason=%q, got %q",
+			receiptErr.Error(),
+			repo.markBlockReceiptsSyncFailedReason,
+		)
+	}
+
+	if repo.markBlockReceiptsSyncedCalled {
+		t.Fatalf("expected MarkBlockReceiptsSynced not to be called")
 	}
 }
