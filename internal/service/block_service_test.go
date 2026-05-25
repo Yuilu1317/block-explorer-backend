@@ -169,6 +169,30 @@ func (f *fakeTransactionReceiptSyncer) SyncBlockTransactionReceipts(ctx context.
 	return nil
 }
 
+type fakeTransactionRepository struct {
+	existingTxs map[string]*models.Transaction
+	err         error
+
+	called bool
+	hashes []string
+}
+
+func (f *fakeTransactionRepository) GetTransactionsByHashes(
+	ctx context.Context,
+	hashes []string,
+) (map[string]*models.Transaction, error) {
+	f.called = true
+	f.hashes = hashes
+
+	if f.err != nil {
+		return nil, f.err
+	}
+	if f.existingTxs != nil {
+		return f.existingTxs, nil
+	}
+	return map[string]*models.Transaction{}, nil
+}
+
 func assertInsertedBlockSyncState(
 	t *testing.T,
 	block *models.Block,
@@ -204,9 +228,45 @@ func assertInsertedBlockSyncState(
 	}
 }
 
+type blockServiceTestEnv struct {
+	svc           *BlockService
+	blockRepo     *fakeBlockRepo
+	blockRPC      *fakeBlockRPC
+	txRepo        *fakeTransactionRepository
+	receiptSyncer *fakeTransactionReceiptSyncer
+}
+
+func setupBlockServiceTestEnv(t *testing.T, startBlock uint64) *blockServiceTestEnv {
+	t.Helper()
+
+	rpc := &fakeBlockRPC{}
+	blockRepo := &fakeBlockRepo{}
+	txRepo := &fakeTransactionRepository{}
+	receiptSyncer := &fakeTransactionReceiptSyncer{}
+
+	svc := NewBlockService(
+		rpc,
+		blockRepo,
+		txRepo,
+		receiptSyncer,
+		startBlock,
+	)
+
+	return &blockServiceTestEnv{
+		svc:           svc,
+		blockRepo:     blockRepo,
+		blockRPC:      rpc,
+		txRepo:        txRepo,
+		receiptSyncer: receiptSyncer,
+	}
+}
+
 func setupTestService(t *testing.T) (*BlockService, *fakeBlockRepo, *fakeBlockRPC) {
 	t.Helper()
-	return setupTestServiceWithStartBlock(t, 20)
+
+	env := setupBlockServiceTestEnv(t, 20)
+
+	return env.svc, env.blockRepo, env.blockRPC
 }
 
 func setupTestServiceWithStartBlock(
@@ -215,20 +275,19 @@ func setupTestServiceWithStartBlock(
 ) (*BlockService, *fakeBlockRepo, *fakeBlockRPC) {
 	t.Helper()
 
-	rpc := &fakeBlockRPC{}
-	r := &fakeBlockRepo{}
-	receiptSyncer := &fakeTransactionReceiptSyncer{}
+	env := setupBlockServiceTestEnv(t, startBlock)
 
-	svc := NewBlockService(rpc, r, receiptSyncer, startBlock)
-
-	return svc, r, rpc
+	return env.svc, env.blockRepo, env.blockRPC
 }
 
 func setupTestServiceWithReceiptSyncer(
 	t *testing.T,
 ) (*BlockService, *fakeBlockRepo, *fakeBlockRPC, *fakeTransactionReceiptSyncer) {
 	t.Helper()
-	return setupTestServiceWithReceiptSyncerAndStartBlock(t, 20)
+
+	env := setupBlockServiceTestEnv(t, 20)
+
+	return env.svc, env.blockRepo, env.blockRPC, env.receiptSyncer
 }
 
 func setupTestServiceWithReceiptSyncerAndStartBlock(
@@ -237,13 +296,9 @@ func setupTestServiceWithReceiptSyncerAndStartBlock(
 ) (*BlockService, *fakeBlockRepo, *fakeBlockRPC, *fakeTransactionReceiptSyncer) {
 	t.Helper()
 
-	rpc := &fakeBlockRPC{}
-	r := &fakeBlockRepo{}
-	receiptSyncer := &fakeTransactionReceiptSyncer{}
+	env := setupBlockServiceTestEnv(t, startBlock)
 
-	svc := NewBlockService(rpc, r, receiptSyncer, startBlock)
-
-	return svc, r, rpc, receiptSyncer
+	return env.svc, env.blockRepo, env.blockRPC, env.receiptSyncer
 }
 
 func TestBlockService_GetBlockByNumber_DBHit(t *testing.T) {
@@ -1316,5 +1371,202 @@ func TestBlockService_SyncBlockToDB_ReturnsErrorWhenMarkBlockReceiptsSyncFailedF
 
 	if repo.markBlockReceiptsSyncedCalled {
 		t.Fatalf("expected MarkBlockReceiptsSynced not to be called")
+	}
+}
+
+func TestBlockService_SyncBlockToDB_AllowsInsertWhenTransactionDoesNotExist(t *testing.T) {
+	env := setupBlockServiceTestEnv(t, 20)
+
+	chainID := big.NewInt(1)
+	env.blockRPC.chainID = chainID
+
+	to := common.HexToAddress("0x2222222222222222222222222222222222222222")
+	signedTx, _ := newSignedTestTransaction(t, chainID, 1, to)
+
+	env.blockRPC.block = newTestBlockWithTransactions(20, []*ethtypes.Transaction{
+		signedTx,
+	})
+	env.blockRPC.err = nil
+
+	env.txRepo.existingTxs = map[string]*models.Transaction{}
+
+	err := env.svc.SyncBlockToDB(context.Background(), 20)
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+
+	if !env.txRepo.called {
+		t.Fatalf("expected GetTransactionsByHashes to be called")
+	}
+
+	if len(env.txRepo.hashes) != 1 {
+		t.Fatalf("expected 1 hash lookup, got %d", len(env.txRepo.hashes))
+	}
+
+	if env.txRepo.hashes[0] != signedTx.Hash().Hex() {
+		t.Fatalf("expected hash=%s, got %s", signedTx.Hash().Hex(), env.txRepo.hashes[0])
+	}
+
+	if !env.blockRepo.insertBlockWithTransactionsCalled {
+		t.Fatalf("expected InsertBlockWithTransactions to be called")
+	}
+
+	if !env.receiptSyncer.called {
+		t.Fatalf("expected SyncBlockTransactionReceipts to be called")
+	}
+
+	if !env.blockRepo.markBlockReceiptsSyncedCalled {
+		t.Fatalf("expected MarkBlockReceiptsSynced to be called")
+	}
+}
+
+func TestBlockService_SyncBlockToDB_AllowsIdempotentTransactionWhenExistingLocationMatches(t *testing.T) {
+	env := setupBlockServiceTestEnv(t, 20)
+
+	chainID := big.NewInt(1)
+	env.blockRPC.chainID = chainID
+
+	to := common.HexToAddress("0x2222222222222222222222222222222222222222")
+	signedTx, _ := newSignedTestTransaction(t, chainID, 1, to)
+
+	block := newTestBlockWithTransactions(20, []*ethtypes.Transaction{
+		signedTx,
+	})
+	env.blockRPC.block = block
+	env.blockRPC.err = nil
+
+	txHash := signedTx.Hash().Hex()
+
+	env.txRepo.existingTxs = map[string]*models.Transaction{
+		txHash: {
+			Hash:        txHash,
+			BlockNumber: 20,
+			BlockHash:   block.Hash().Hex(),
+			TxIndex:     0,
+		},
+	}
+
+	err := env.svc.SyncBlockToDB(context.Background(), 20)
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+
+	if !env.txRepo.called {
+		t.Fatalf("expected GetTransactionsByHashes to be called")
+	}
+
+	if !env.blockRepo.insertBlockWithTransactionsCalled {
+		t.Fatalf("expected InsertBlockWithTransactions to be called")
+	}
+
+	if len(env.blockRepo.insertTxsArg) != 1 {
+		t.Fatalf("expected 1 tx passed to InsertBlockWithTransactions, got %d", len(env.blockRepo.insertTxsArg))
+	}
+
+	if !env.receiptSyncer.called {
+		t.Fatalf("expected SyncBlockTransactionReceipts to be called")
+	}
+
+	if !env.blockRepo.markBlockReceiptsSyncedCalled {
+		t.Fatalf("expected MarkBlockReceiptsSynced to be called")
+	}
+
+	if env.blockRepo.markBlockReceiptsSyncFailedCalled {
+		t.Fatalf("expected MarkBlockReceiptsSyncFailed not to be called")
+	}
+}
+
+func TestBlockService_SyncBlockToDB_ReturnsErrChainDataConflictWhenExistingTransactionLocationDiffers(t *testing.T) {
+	env := setupBlockServiceTestEnv(t, 20)
+
+	chainID := big.NewInt(1)
+	env.blockRPC.chainID = chainID
+
+	to := common.HexToAddress("0x2222222222222222222222222222222222222222")
+	signedTx, _ := newSignedTestTransaction(t, chainID, 1, to)
+
+	block := newTestBlockWithTransactions(20, []*ethtypes.Transaction{
+		signedTx,
+	})
+	env.blockRPC.block = block
+	env.blockRPC.err = nil
+
+	txHash := signedTx.Hash().Hex()
+
+	env.txRepo.existingTxs = map[string]*models.Transaction{
+		txHash: {
+			Hash:        txHash,
+			BlockNumber: 19,
+			BlockHash:   common.HexToHash("0xoldblock").Hex(),
+			TxIndex:     0,
+		},
+	}
+
+	err := env.svc.SyncBlockToDB(context.Background(), 20)
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+
+	if !errors.Is(err, types.ErrChainDataConflict) {
+		t.Fatalf("expected ErrChainDataConflict, got %v", err)
+	}
+
+	if !strings.Contains(err.Error(), txHash) {
+		t.Fatalf("expected error to include tx hash %s, got %v", txHash, err)
+	}
+
+	if env.blockRepo.insertBlockWithTransactionsCalled {
+		t.Fatalf("expected InsertBlockWithTransactions not to be called")
+	}
+
+	if env.receiptSyncer.called {
+		t.Fatalf("expected SyncBlockTransactionReceipts not to be called")
+	}
+
+	if env.blockRepo.markBlockReceiptsSyncedCalled {
+		t.Fatalf("expected MarkBlockReceiptsSynced not to be called")
+	}
+
+	if env.blockRepo.markBlockReceiptsSyncFailedCalled {
+		t.Fatalf("expected MarkBlockReceiptsSyncFailed not to be called")
+	}
+}
+
+func TestBlockService_SyncBlockToDB_ReturnsErrorWhenQueryExistingTransactionsFails(t *testing.T) {
+	env := setupBlockServiceTestEnv(t, 20)
+
+	chainID := big.NewInt(1)
+	env.blockRPC.chainID = chainID
+
+	to := common.HexToAddress("0x2222222222222222222222222222222222222222")
+	signedTx, _ := newSignedTestTransaction(t, chainID, 1, to)
+
+	env.blockRPC.block = newTestBlockWithTransactions(20, []*ethtypes.Transaction{
+		signedTx,
+	})
+	env.blockRPC.err = nil
+
+	txRepoErr := errors.New("query existing txs error")
+	env.txRepo.err = txRepoErr
+
+	err := env.svc.SyncBlockToDB(context.Background(), 20)
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+
+	if !errors.Is(err, txRepoErr) {
+		t.Fatalf("expected tx repo error, got %v", err)
+	}
+
+	if !strings.Contains(err.Error(), "query existing transactions by hashes") {
+		t.Fatalf("expected wrapped tx lookup error, got %v", err)
+	}
+
+	if env.blockRepo.insertBlockWithTransactionsCalled {
+		t.Fatalf("expected InsertBlockWithTransactions not to be called")
+	}
+
+	if env.receiptSyncer.called {
+		t.Fatalf("expected SyncBlockTransactionReceipts not to be called")
 	}
 }

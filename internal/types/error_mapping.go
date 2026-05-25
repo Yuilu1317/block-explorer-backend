@@ -80,6 +80,12 @@ func MapError(err error) (int, ErrorResponse) {
 			Message: "invalid pagination",
 		}
 
+	case errors.Is(err, ErrChainDataConflict):
+		return http.StatusConflict, ErrorResponse{
+			Code:    http.StatusConflict,
+			Message: "chain data conflict detected",
+		}
+
 	default:
 		return http.StatusInternalServerError, ErrorResponse{
 			Code:    http.StatusInternalServerError,

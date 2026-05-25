@@ -54,7 +54,7 @@ func Run() error {
 	blockRepo := repo.NewBlockRepository(database)
 	// txService implements TransactionReceiptSyncer.
 	// BlockService uses it to sync transaction receipts after block + transactions are inserted.
-	blockService := service.NewBlockService(blockRPC, blockRepo, txService, cfg.Indexer.StartBlock)
+	blockService := service.NewBlockService(blockRPC, blockRepo, txRepo, txService, cfg.Indexer.StartBlock)
 	blockController := controller.NewBlockController(blockService)
 
 	addressRPC := rpc.NewAddressRPC(ethClient, rpcClient, cfg.Rpc.TimeoutSeconds)

@@ -32,9 +32,14 @@ type TransactionReceiptSyncer interface {
 	SyncBlockTransactionReceipts(ctx context.Context, blockNumber uint64) error
 }
 
+type TransactionRepository interface {
+	GetTransactionsByHashes(ctx context.Context, hashes []string) (map[string]*models.Transaction, error)
+}
+
 type BlockService struct {
 	blockRPC                 BlockRPC
 	blockRepo                BlockRepository
+	transactionRepository    TransactionRepository
 	transactionReceiptSyncer TransactionReceiptSyncer
 
 	startBlock uint64
@@ -43,12 +48,14 @@ type BlockService struct {
 func NewBlockService(
 	blockRPC BlockRPC,
 	blockRepo BlockRepository,
+	transactionRepository TransactionRepository,
 	transactionReceiptSyncer TransactionReceiptSyncer,
 	startBlock uint64,
 ) *BlockService {
 	return &BlockService{
 		blockRPC:                 blockRPC,
 		blockRepo:                blockRepo,
+		transactionRepository:    transactionRepository,
 		transactionReceiptSyncer: transactionReceiptSyncer,
 		startBlock:               startBlock,
 	}
@@ -155,6 +162,49 @@ func (s *BlockService) buildTransactionModelsFromBlock(ctx context.Context, bloc
 	return txModels, nil
 }
 
+func (s *BlockService) validateTransactionsForSync(
+	ctx context.Context,
+	txModels []*models.Transaction,
+) error {
+	if len(txModels) == 0 {
+		return nil
+	}
+
+	hashes := make([]string, 0, len(txModels))
+	for _, txModel := range txModels {
+		hashes = append(hashes, txModel.Hash)
+	}
+
+	existingTxs, err := s.transactionRepository.GetTransactionsByHashes(ctx, hashes)
+	if err != nil {
+		return fmt.Errorf("query existing transactions by hashes: %w", err)
+	}
+
+	for _, txModel := range txModels {
+		existingTx, exists := existingTxs[txModel.Hash]
+		if !exists {
+			continue
+		}
+
+		if existingTx.BlockNumber != txModel.BlockNumber ||
+			!strings.EqualFold(existingTx.BlockHash, txModel.BlockHash) ||
+			existingTx.TxIndex != txModel.TxIndex {
+			return fmt.Errorf(
+				"transaction conflict: tx_hash=%s existing_block_number=%d existing_block_hash=%s existing_tx_index=%d new_block_number=%d new_block_hash=%s new_tx_index=%d: %w",
+				txModel.Hash,
+				existingTx.BlockNumber,
+				existingTx.BlockHash,
+				existingTx.TxIndex,
+				txModel.BlockNumber,
+				txModel.BlockHash,
+				txModel.TxIndex,
+				types.ErrChainDataConflict,
+			)
+		}
+	}
+	return nil
+}
+
 func (s *BlockService) SyncBlockToDB(ctx context.Context, number uint64) error {
 	block, err := s.getRawBlockByNumber(ctx, number)
 	if err != nil {
@@ -170,6 +220,10 @@ func (s *BlockService) SyncBlockToDB(ctx context.Context, number uint64) error {
 	txModels, err := s.buildTransactionModelsFromBlock(ctx, block)
 	if err != nil {
 		return err
+	}
+
+	if err := s.validateTransactionsForSync(ctx, txModels); err != nil {
+		return fmt.Errorf("validate transactions for block %d: %w", blockModel.Number, err)
 	}
 
 	blockModel.TransactionsSynced = true
@@ -235,7 +289,9 @@ func (s *BlockService) SyncBlockRangeToDB(ctx context.Context, start, end uint64
 		if err != nil {
 			result.Failed++
 			result.FailedBlocks = append(result.FailedBlocks, number)
-			if errors.Is(err, types.ErrReorgDetected) || errors.Is(err, types.ErrChainDiscontinuity) {
+			if errors.Is(err, types.ErrReorgDetected) ||
+				errors.Is(err, types.ErrChainDiscontinuity) ||
+				errors.Is(err, types.ErrChainDataConflict) {
 				return result, fmt.Errorf("sync block %d: %w", number, err)
 			}
 			continue

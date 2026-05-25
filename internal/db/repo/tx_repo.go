@@ -65,6 +65,35 @@ func (r *TransactionRepository) GetTransactionByHash(ctx context.Context, hash s
 	return &tx, true, nil
 }
 
+func (r *TransactionRepository) GetTransactionsByHashes(
+	ctx context.Context,
+	hashes []string,
+) (map[string]*models.Transaction, error) {
+	result := make(map[string]*models.Transaction, len(hashes))
+
+	if len(hashes) == 0 {
+		return result, nil
+	}
+
+	var txs []models.Transaction
+	err := r.db.WithContext(ctx).
+		Where("hash IN ?", hashes).
+		Find(&txs).
+		Error
+	if err != nil {
+		if mapped := mapDBError(err); mapped != nil {
+			return nil, mapped
+		}
+		return nil, fmt.Errorf("query transactions by hashes: %w", err)
+	}
+
+	for i := range txs {
+		result[txs[i].Hash] = &txs[i]
+	}
+
+	return result, nil
+}
+
 func (r *TransactionRepository) ListTransactionsByAddress(
 	ctx context.Context,
 	address string,

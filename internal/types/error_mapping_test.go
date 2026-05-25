@@ -41,3 +41,21 @@ func TestMapError_ReturnsConflictWhenChainDiscontinuityDetected(t *testing.T) {
 		t.Fatalf("expected message %q, got %q", "chain discontinuity detected", resp.Message)
 	}
 }
+
+func TestMapError_ReturnsConflictWhenChainDataConflictDetected(t *testing.T) {
+	err := fmt.Errorf("validate transactions for block 100: %w", ErrChainDataConflict)
+
+	statusCode, resp := MapError(err)
+
+	if statusCode != http.StatusConflict {
+		t.Fatalf("expected status code %d, got %d", http.StatusConflict, statusCode)
+	}
+
+	if resp.Code != http.StatusConflict {
+		t.Fatalf("expected response code %d, got %d", http.StatusConflict, resp.Code)
+	}
+
+	if resp.Message != "chain data conflict detected" {
+		t.Fatalf("expected message %q, got %q", "chain data conflict detected", resp.Message)
+	}
+}

@@ -22,4 +22,6 @@ var (
 	ErrDBTimeout  = errors.New("db timeout")
 
 	ErrRequestCanceled = errors.New("request canceled")
+
+	ErrChainDataConflict = errors.New("chain data conflict")
 )

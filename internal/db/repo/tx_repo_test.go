@@ -269,6 +269,154 @@ func TestTransactionRepository_GetTransactionByHash_DBError(t *testing.T) {
 	}
 }
 
+func TestTransactionRepository_GetTransactionsByHashes_EmptyInput(t *testing.T) {
+	r, _ := setupTransactionRepo(t)
+	ctx := context.Background()
+
+	got, err := r.GetTransactionsByHashes(ctx, nil)
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+
+	if got == nil {
+		t.Fatalf("expected empty map, got nil")
+	}
+
+	if len(got) != 0 {
+		t.Fatalf("expected empty map, got %d items", len(got))
+	}
+
+	got, err = r.GetTransactionsByHashes(ctx, []string{})
+	if err != nil {
+		t.Fatalf("expected nil error for empty slice, got %v", err)
+	}
+
+	if got == nil {
+		t.Fatalf("expected empty map for empty slice, got nil")
+	}
+
+	if len(got) != 0 {
+		t.Fatalf("expected empty map for empty slice, got %d items", len(got))
+	}
+}
+
+func TestTransactionRepository_GetTransactionsByHashes_ReturnsOnlyMatchedTransactions(t *testing.T) {
+	r, db := setupTransactionRepo(t)
+	ctx := context.Background()
+
+	tx1 := newTestTransaction("0xtxhash1", 100, 0)
+	tx2 := newTestTransaction("0xtxhash2", 101, 1)
+	tx3 := newTestTransaction("0xtxhash3", 102, 2)
+
+	for _, tx := range []*models.Transaction{tx1, tx2, tx3} {
+		if err := db.Create(tx).Error; err != nil {
+			t.Fatalf("seed transaction %s: %v", tx.Hash, err)
+		}
+	}
+
+	got, err := r.GetTransactionsByHashes(ctx, []string{
+		"0xtxhash1",
+		"0xmissing",
+		"0xtxhash3",
+	})
+	if err != nil {
+		t.Fatalf("get transactions by hashes: %v", err)
+	}
+
+	if got == nil {
+		t.Fatalf("expected result map, got nil")
+	}
+
+	if len(got) != 2 {
+		t.Fatalf("expected 2 matched transactions, got %d", len(got))
+	}
+
+	gotTx1, exists := got["0xtxhash1"]
+	if !exists {
+		t.Fatalf("expected 0xtxhash1 to exist")
+	}
+	if gotTx1 == nil {
+		t.Fatalf("expected 0xtxhash1 transaction, got nil")
+	}
+	if gotTx1.BlockNumber != 100 {
+		t.Fatalf("expected 0xtxhash1 block number=100, got %d", gotTx1.BlockNumber)
+	}
+	if gotTx1.TxIndex != 0 {
+		t.Fatalf("expected 0xtxhash1 tx index=0, got %d", gotTx1.TxIndex)
+	}
+
+	gotTx3, exists := got["0xtxhash3"]
+	if !exists {
+		t.Fatalf("expected 0xtxhash3 to exist")
+	}
+	if gotTx3 == nil {
+		t.Fatalf("expected 0xtxhash3 transaction, got nil")
+	}
+	if gotTx3.BlockNumber != 102 {
+		t.Fatalf("expected 0xtxhash3 block number=102, got %d", gotTx3.BlockNumber)
+	}
+	if gotTx3.TxIndex != 2 {
+		t.Fatalf("expected 0xtxhash3 tx index=2, got %d", gotTx3.TxIndex)
+	}
+
+	if _, exists := got["0xmissing"]; exists {
+		t.Fatalf("expected 0xmissing not to exist")
+	}
+
+	if _, exists := got["0xtxhash2"]; exists {
+		t.Fatalf("expected 0xtxhash2 not to exist because it was not requested")
+	}
+}
+
+func TestTransactionRepository_GetTransactionsByHashes_ReturnsEmptyMapWhenNoHashesMatch(t *testing.T) {
+	r, db := setupTransactionRepo(t)
+	ctx := context.Background()
+
+	tx := newTestTransaction("0xtxhash1", 100, 0)
+	if err := db.Create(tx).Error; err != nil {
+		t.Fatalf("seed transaction: %v", err)
+	}
+
+	got, err := r.GetTransactionsByHashes(ctx, []string{
+		"0xmissing1",
+		"0xmissing2",
+	})
+	if err != nil {
+		t.Fatalf("get transactions by hashes: %v", err)
+	}
+
+	if got == nil {
+		t.Fatalf("expected empty map, got nil")
+	}
+
+	if len(got) != 0 {
+		t.Fatalf("expected empty map, got %d items", len(got))
+	}
+}
+
+func TestTransactionRepository_GetTransactionsByHashes_DBError(t *testing.T) {
+	r, db := setupTransactionRepo(t)
+	ctx := context.Background()
+
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("get sql db: %v", err)
+	}
+
+	if err := sqlDB.Close(); err != nil {
+		t.Fatalf("close db: %v", err)
+	}
+
+	got, err := r.GetTransactionsByHashes(ctx, []string{"0xtxhash1"})
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+
+	if got != nil {
+		t.Fatalf("expected nil result on error, got %+v", got)
+	}
+}
+
 func TestTransactionRepository_ListTransactionsByAddress_ReturnsTxsWhenFromAddressMatches(t *testing.T) {
 	r, db := setupTransactionRepo(t)
 	ctx := context.Background()
