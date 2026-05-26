@@ -1570,3 +1570,108 @@ func TestBlockService_SyncBlockToDB_ReturnsErrorWhenQueryExistingTransactionsFai
 		t.Fatalf("expected SyncBlockTransactionReceipts not to be called")
 	}
 }
+
+func TestBlockService_SyncBlockToDB_RetriesReceiptsFailedBlockAndMarksCompleted(t *testing.T) {
+	env := setupBlockServiceTestEnv(t, 20)
+
+	chainID := big.NewInt(1)
+	env.blockRPC.chainID = chainID
+
+	to := common.HexToAddress("0x2222222222222222222222222222222222222222")
+	signedTx, _ := newSignedTestTransaction(t, chainID, 1, to)
+
+	block := newTestBlockWithTransactions(20, []*ethtypes.Transaction{
+		signedTx,
+	})
+	env.blockRPC.block = block
+	env.blockRPC.err = nil
+
+	previousErr := "previous receipt sync error"
+
+	env.blockRepo.block = &models.Block{
+		Number:             20,
+		Hash:               block.Hash().Hex(),
+		TransactionsSynced: true,
+		ReceiptsSynced:     false,
+		SyncStatus:         models.BlockSyncStatusReceiptsFailed,
+		LastSyncError:      &previousErr,
+	}
+	env.blockRepo.found = true
+
+	txHash := signedTx.Hash().Hex()
+	env.txRepo.existingTxs = map[string]*models.Transaction{
+		txHash: {
+			Hash:        txHash,
+			BlockNumber: 20,
+			BlockHash:   block.Hash().Hex(),
+			TxIndex:     0,
+		},
+	}
+
+	err := env.svc.SyncBlockToDB(context.Background(), 20)
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+
+	if !env.txRepo.called {
+		t.Fatalf("expected GetTransactionsByHashes to be called")
+	}
+
+	if len(env.txRepo.hashes) != 1 {
+		t.Fatalf("expected 1 hash lookup, got %d", len(env.txRepo.hashes))
+	}
+
+	if env.txRepo.hashes[0] != txHash {
+		t.Fatalf("expected hash=%s, got %s", txHash, env.txRepo.hashes[0])
+	}
+
+	if !env.blockRepo.insertBlockWithTransactionsCalled {
+		t.Fatalf("expected InsertBlockWithTransactions to be called")
+	}
+
+	if env.blockRepo.insertBlockArg == nil {
+		t.Fatalf("expected inserted block, got nil")
+	}
+
+	if env.blockRepo.insertBlockArg.Number != 20 {
+		t.Fatalf("expected inserted block number=20, got %d", env.blockRepo.insertBlockArg.Number)
+	}
+
+	assertInsertedBlockSyncState(
+		t,
+		env.blockRepo.insertBlockArg,
+		true,
+		false,
+		models.BlockSyncStatusTransactionsSynced,
+	)
+
+	if len(env.blockRepo.insertTxsArg) != 1 {
+		t.Fatalf("expected 1 tx passed to InsertBlockWithTransactions, got %d", len(env.blockRepo.insertTxsArg))
+	}
+
+	if !env.receiptSyncer.called {
+		t.Fatalf("expected SyncBlockTransactionReceipts to be called")
+	}
+
+	if env.receiptSyncer.calls != 1 {
+		t.Fatalf("expected 1 receipt sync call, got %d", env.receiptSyncer.calls)
+	}
+
+	if env.receiptSyncer.gotBlockNumber != 20 {
+		t.Fatalf("expected receipt sync block number=20, got %d", env.receiptSyncer.gotBlockNumber)
+	}
+
+	if !env.blockRepo.markBlockReceiptsSyncedCalled {
+		t.Fatalf("expected MarkBlockReceiptsSynced to be called")
+	}
+
+	if env.blockRepo.markBlockReceiptsSyncedBlockNumber != 20 {
+		t.Fatalf("expected MarkBlockReceiptsSynced block number=20, got %d",
+			env.blockRepo.markBlockReceiptsSyncedBlockNumber,
+		)
+	}
+
+	if env.blockRepo.markBlockReceiptsSyncFailedCalled {
+		t.Fatalf("expected MarkBlockReceiptsSyncFailed not to be called")
+	}
+}
