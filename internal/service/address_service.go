@@ -16,7 +16,7 @@ type AddressRPC interface {
 	GetCode(ctx context.Context, address string) (string, error)
 }
 
-type TxRepoToAddressService interface {
+type AddressTransactionReader interface {
 	ListTransactionsByAddress(
 		ctx context.Context,
 		address string,
@@ -26,14 +26,14 @@ type TxRepoToAddressService interface {
 }
 
 type AddressService struct {
-	addressRPC             AddressRPC
-	txRepoToAddressService TxRepoToAddressService
+	addressRPC               AddressRPC
+	addressTransactionReader AddressTransactionReader
 }
 
-func NewAddressService(addressRPC AddressRPC, txRepoToAddressService TxRepoToAddressService) *AddressService {
+func NewAddressService(addressRPC AddressRPC, txRepoToAddressService AddressTransactionReader) *AddressService {
 	return &AddressService{
-		addressRPC:             addressRPC,
-		txRepoToAddressService: txRepoToAddressService,
+		addressRPC:               addressRPC,
+		addressTransactionReader: txRepoToAddressService,
 	}
 }
 
@@ -87,7 +87,7 @@ func (s *AddressService) GetIndexedTransactionsByAddress(
 	limit := pageSize
 	offset := (page - 1) * pageSize
 
-	txs, err := s.txRepoToAddressService.ListTransactionsByAddress(ctx, address, limit, offset)
+	txs, err := s.addressTransactionReader.ListTransactionsByAddress(ctx, address, limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("list indexed transactions by address %s: %w", address, err)
 	}

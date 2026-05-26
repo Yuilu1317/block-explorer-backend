@@ -617,3 +617,94 @@ func TestToAddressTransactionDTO_KeepsNilReceiptFields(t *testing.T) {
 		t.Fatalf("expected nil gas used, got %d", *dto.GasUsed)
 	}
 }
+
+func TestToAddressTransactionDTO_PreservesReceiptStatusNilZeroOne(t *testing.T) {
+	queryAddress := "0x1111111111111111111111111111111111111111"
+	toAddress := "0x2222222222222222222222222222222222222222"
+
+	statusZero := uint64(0)
+	statusOne := uint64(1)
+	gasUsed := uint64(21000)
+
+	tests := []struct {
+		name           string
+		tx             *models.Transaction
+		wantStatusNil  bool
+		wantStatus     uint64
+		wantGasUsedNil bool
+		wantGasUsed    uint64
+	}{
+		{
+			name: "receipt not synced keeps nil status and nil gas used",
+			tx: func() *models.Transaction {
+				tx := newAddressMapperTestTransaction("0xpending", queryAddress, toAddress)
+				tx.ReceiptStatus = nil
+				tx.ReceiptGasUsed = nil
+				return tx
+			}(),
+			wantStatusNil:  true,
+			wantGasUsedNil: true,
+		},
+		{
+			name: "failed receipt keeps status zero",
+			tx: func() *models.Transaction {
+				tx := newAddressMapperTestTransaction("0xfailed", queryAddress, toAddress)
+				tx.ReceiptStatus = &statusZero
+				tx.ReceiptGasUsed = &gasUsed
+				return tx
+			}(),
+			wantStatusNil:  false,
+			wantStatus:     0,
+			wantGasUsedNil: false,
+			wantGasUsed:    gasUsed,
+		},
+		{
+			name: "successful receipt keeps status one",
+			tx: func() *models.Transaction {
+				tx := newAddressMapperTestTransaction("0xsuccess", queryAddress, toAddress)
+				tx.ReceiptStatus = &statusOne
+				tx.ReceiptGasUsed = &gasUsed
+				return tx
+			}(),
+			wantStatusNil:  false,
+			wantStatus:     1,
+			wantGasUsedNil: false,
+			wantGasUsed:    gasUsed,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ToAddressTransactionDTO(tt.tx, strings.ToLower(queryAddress))
+			if got == nil {
+				t.Fatalf("expected dto, got nil")
+			}
+
+			if tt.wantStatusNil {
+				if got.Status != nil {
+					t.Fatalf("expected nil status, got %d", *got.Status)
+				}
+			} else {
+				if got.Status == nil {
+					t.Fatalf("expected status=%d, got nil", tt.wantStatus)
+				}
+				if *got.Status != tt.wantStatus {
+					t.Fatalf("expected status=%d, got %d", tt.wantStatus, *got.Status)
+				}
+			}
+
+			if tt.wantGasUsedNil {
+				if got.GasUsed != nil {
+					t.Fatalf("expected nil gas used, got %d", *got.GasUsed)
+				}
+			} else {
+				if got.GasUsed == nil {
+					t.Fatalf("expected gas_used=%d, got nil", tt.wantGasUsed)
+				}
+				if *got.GasUsed != tt.wantGasUsed {
+					t.Fatalf("expected gas_used=%d, got %d", tt.wantGasUsed, *got.GasUsed)
+				}
+			}
+		})
+	}
+}

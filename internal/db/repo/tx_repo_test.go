@@ -483,6 +483,103 @@ func TestTransactionRepository_ListTransactionsByAddress_ReturnsTxsWhenToAddress
 	}
 }
 
+func findTransactionEntityByHash(txs []models.Transaction, hash string) *models.Transaction {
+	for i := range txs {
+		if txs[i].Hash == hash {
+			return &txs[i]
+		}
+	}
+	return nil
+}
+
+func TestTransactionRepository_ListTransactionsByAddress_PreservesReceiptStatusNilZeroOne(t *testing.T) {
+	r, db := setupTransactionRepo(t)
+	ctx := context.Background()
+
+	address := "0x1111111111111111111111111111111111111111"
+
+	statusZero := uint64(0)
+	statusOne := uint64(1)
+	gasUsed := uint64(21000)
+
+	pendingTx := newTestTransaction("0xpending", 100, 0)
+	// ReceiptStatus nil, ReceiptGasUsed nil
+
+	failedTx := newTestTransaction("0xfailed", 101, 0)
+	failedTx.ReceiptStatus = &statusZero
+	failedTx.ReceiptGasUsed = &gasUsed
+
+	successTx := newTestTransaction("0xsuccess", 102, 0)
+	successTx.ReceiptStatus = &statusOne
+	successTx.ReceiptGasUsed = &gasUsed
+
+	txs := []*models.Transaction{
+		pendingTx,
+		failedTx,
+		successTx,
+	}
+
+	for _, tx := range txs {
+		if err := db.Create(tx).Error; err != nil {
+			t.Fatalf("seed transaction %s: %v", tx.Hash, err)
+		}
+	}
+
+	got, err := r.ListTransactionsByAddress(ctx, address, 10, 0)
+	if err != nil {
+		t.Fatalf("list transactions by address: %v", err)
+	}
+
+	if len(got) != 3 {
+		t.Fatalf("expected 3 transactions, got %d", len(got))
+	}
+
+	gotPending := findTransactionEntityByHash(got, "0xpending")
+	if gotPending == nil {
+		t.Fatalf("expected pending transaction to be returned")
+	}
+	if gotPending.ReceiptStatus != nil {
+		t.Fatalf("expected pending receipt status nil, got %d", *gotPending.ReceiptStatus)
+	}
+	if gotPending.ReceiptGasUsed != nil {
+		t.Fatalf("expected pending receipt gas used nil, got %d", *gotPending.ReceiptGasUsed)
+	}
+
+	gotFailed := findTransactionEntityByHash(got, "0xfailed")
+	if gotFailed == nil {
+		t.Fatalf("expected failed transaction to be returned")
+	}
+	if gotFailed.ReceiptStatus == nil {
+		t.Fatalf("expected failed receipt status, got nil")
+	}
+	if *gotFailed.ReceiptStatus != uint64(0) {
+		t.Fatalf("expected failed receipt status=0, got %d", *gotFailed.ReceiptStatus)
+	}
+	if gotFailed.ReceiptGasUsed == nil {
+		t.Fatalf("expected failed receipt gas used, got nil")
+	}
+	if *gotFailed.ReceiptGasUsed != gasUsed {
+		t.Fatalf("expected failed receipt gas used=%d, got %d", gasUsed, *gotFailed.ReceiptGasUsed)
+	}
+
+	gotSuccess := findTransactionEntityByHash(got, "0xsuccess")
+	if gotSuccess == nil {
+		t.Fatalf("expected success transaction to be returned")
+	}
+	if gotSuccess.ReceiptStatus == nil {
+		t.Fatalf("expected success receipt status, got nil")
+	}
+	if *gotSuccess.ReceiptStatus != uint64(1) {
+		t.Fatalf("expected success receipt status=1, got %d", *gotSuccess.ReceiptStatus)
+	}
+	if gotSuccess.ReceiptGasUsed == nil {
+		t.Fatalf("expected success receipt gas used, got nil")
+	}
+	if *gotSuccess.ReceiptGasUsed != gasUsed {
+		t.Fatalf("expected success receipt gas used=%d, got %d", gasUsed, *gotSuccess.ReceiptGasUsed)
+	}
+}
+
 func TestTransactionRepository_ListTransactionsByAddress_MatchesLowercaseAddressKey(t *testing.T) {
 	r, db := setupTransactionRepo(t)
 	ctx := context.Background()

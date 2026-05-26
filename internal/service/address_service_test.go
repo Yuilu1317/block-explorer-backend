@@ -398,6 +398,141 @@ func TestAddressService_GetIndexedTransactionsByAddress_Success(t *testing.T) {
 	}
 }
 
+func TestAddressService_GetIndexedTransactionsByAddress_PreservesReceiptStatusNilZeroOne(t *testing.T) {
+	s, fakeRPC, fakeTxRepo := setupAddressServiceTest()
+	ctx := context.Background()
+
+	queryAddress := "0x39fA8c5f2793459D6622857E7D9FbB4BD91766d3"
+	queryAddressLower := strings.ToLower(queryAddress)
+
+	otherAddress := "0x1111111111111111111111111111111111111111"
+
+	statusZero := uint64(0)
+	statusOne := uint64(1)
+	gasUsed := uint64(21000)
+
+	pendingTx := newAddressServiceTestTransaction(
+		"0xpending",
+		100,
+		0,
+		otherAddress,
+		queryAddress,
+	)
+	// ReceiptStatus nil, ReceiptGasUsed nil
+
+	failedTx := newAddressServiceTestTransaction(
+		"0xfailed",
+		101,
+		0,
+		otherAddress,
+		queryAddress,
+	)
+	failedTx.ReceiptStatus = &statusZero
+	failedTx.ReceiptGasUsed = &gasUsed
+
+	successTx := newAddressServiceTestTransaction(
+		"0xsuccess",
+		102,
+		0,
+		otherAddress,
+		queryAddress,
+	)
+	successTx.ReceiptStatus = &statusOne
+	successTx.ReceiptGasUsed = &gasUsed
+
+	fakeTxRepo.listTransactions = []models.Transaction{
+		pendingTx,
+		failedTx,
+		successTx,
+	}
+
+	got, err := s.GetIndexedTransactionsByAddress(ctx, "  "+queryAddress+"  ", 1, 20)
+	if err != nil {
+		t.Fatalf("get indexed transactions by address: %v", err)
+	}
+
+	if got == nil {
+		t.Fatalf("expected result, got nil")
+	}
+
+	if got.Page != 1 {
+		t.Fatalf("expected page=1, got %d", got.Page)
+	}
+
+	if got.PageSize != 20 {
+		t.Fatalf("expected page_size=20, got %d", got.PageSize)
+	}
+
+	if len(got.Items) != 3 {
+		t.Fatalf("expected 3 items, got %d", len(got.Items))
+	}
+
+	if !fakeTxRepo.called {
+		t.Fatalf("expected tx repo called")
+	}
+
+	if fakeTxRepo.gotAddress != queryAddressLower {
+		t.Fatalf("expected repo address=%s, got %s", queryAddressLower, fakeTxRepo.gotAddress)
+	}
+
+	if fakeTxRepo.gotLimit != 20 {
+		t.Fatalf("expected limit=20, got %d", fakeTxRepo.gotLimit)
+	}
+
+	if fakeTxRepo.gotOffset != 0 {
+		t.Fatalf("expected offset=0, got %d", fakeTxRepo.gotOffset)
+	}
+
+	if fakeRPC.balanceCalled || fakeRPC.nonceCalled || fakeRPC.codeCalled {
+		t.Fatalf("expected address rpc not called")
+	}
+
+	pending := got.Items[0]
+	if pending.Hash != "0xpending" {
+		t.Fatalf("expected pending hash=0xpending, got %s", pending.Hash)
+	}
+	if pending.Status != nil {
+		t.Fatalf("expected pending status nil, got %d", *pending.Status)
+	}
+	if pending.GasUsed != nil {
+		t.Fatalf("expected pending gas used nil, got %d", *pending.GasUsed)
+	}
+
+	failed := got.Items[1]
+	if failed.Hash != "0xfailed" {
+		t.Fatalf("expected failed hash=0xfailed, got %s", failed.Hash)
+	}
+	if failed.Status == nil {
+		t.Fatalf("expected failed status, got nil")
+	}
+	if *failed.Status != uint64(0) {
+		t.Fatalf("expected failed status=0, got %d", *failed.Status)
+	}
+	if failed.GasUsed == nil {
+		t.Fatalf("expected failed gas used, got nil")
+	}
+	if *failed.GasUsed != gasUsed {
+		t.Fatalf("expected failed gas used=%d, got %d", gasUsed, *failed.GasUsed)
+	}
+
+	success := got.Items[2]
+	if success.Hash != "0xsuccess" {
+		t.Fatalf("expected success hash=0xsuccess, got %s", success.Hash)
+	}
+	if success.Status == nil {
+		t.Fatalf("expected success status, got nil")
+	}
+	if *success.Status != uint64(1) {
+		t.Fatalf("expected success status=1, got %d", *success.Status)
+	}
+	if success.GasUsed == nil {
+		t.Fatalf("expected success gas used, got nil")
+	}
+	if *success.GasUsed != gasUsed {
+		t.Fatalf("expected success gas used=%d, got %d", gasUsed, *success.GasUsed)
+	}
+}
+
 func TestAddressService_GetIndexedTransactionsByAddress_InvalidAddress(t *testing.T) {
 	s, fakeRPC, fakeTxRepo := setupAddressServiceTest()
 	ctx := context.Background()
