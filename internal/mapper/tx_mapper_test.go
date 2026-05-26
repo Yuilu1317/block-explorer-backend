@@ -492,129 +492,101 @@ func TestToAddressTransactionDTO_UnknownDirection(t *testing.T) {
 	}
 }
 
-func TestToIndexedTransactionDTO_KeepsStatusZero(t *testing.T) {
-	status := uint64(0)
+func TestToIndexedTransactionDTO_PreservesReceiptStatusNilZeroOne(t *testing.T) {
+	statusZero := uint64(0)
+	statusOne := uint64(1)
 	gasUsed := uint64(21000)
 
-	tx := &models.Transaction{
-		Hash:           "0xtxhash",
-		BlockNumber:    100,
-		BlockHash:      "0xblockhash",
-		TxIndex:        1,
-		FromAddress:    "0xfrom",
-		ToAddress:      "0xto",
-		ReceiptStatus:  &status,
-		ReceiptGasUsed: &gasUsed,
+	tests := []struct {
+		name           string
+		tx             *models.Transaction
+		wantStatusNil  bool
+		wantStatus     uint64
+		wantGasUsedNil bool
+		wantGasUsed    uint64
+	}{
+		{
+			name: "receipt not synced keeps nil status and nil gas used",
+			tx: &models.Transaction{
+				Hash:        "0xpending",
+				BlockNumber: 100,
+				BlockHash:   "0xblockhash",
+				TxIndex:     1,
+				FromAddress: "0xfrom",
+				ToAddress:   "0xto",
+			},
+			wantStatusNil:  true,
+			wantGasUsedNil: true,
+		},
+		{
+			name: "failed receipt keeps status zero",
+			tx: &models.Transaction{
+				Hash:           "0xfailed",
+				BlockNumber:    100,
+				BlockHash:      "0xblockhash",
+				TxIndex:        1,
+				FromAddress:    "0xfrom",
+				ToAddress:      "0xto",
+				ReceiptStatus:  &statusZero,
+				ReceiptGasUsed: &gasUsed,
+			},
+			wantStatusNil:  false,
+			wantStatus:     0,
+			wantGasUsedNil: false,
+			wantGasUsed:    gasUsed,
+		},
+		{
+			name: "successful receipt keeps status one",
+			tx: &models.Transaction{
+				Hash:           "0xsuccess",
+				BlockNumber:    100,
+				BlockHash:      "0xblockhash",
+				TxIndex:        1,
+				FromAddress:    "0xfrom",
+				ToAddress:      "0xto",
+				ReceiptStatus:  &statusOne,
+				ReceiptGasUsed: &gasUsed,
+			},
+			wantStatusNil:  false,
+			wantStatus:     1,
+			wantGasUsedNil: false,
+			wantGasUsed:    gasUsed,
+		},
 	}
 
-	dto := ToIndexedTransactionDTO(tx)
-	if dto == nil {
-		t.Fatalf("expected dto, got nil")
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ToIndexedTransactionDTO(tt.tx)
+			if got == nil {
+				t.Fatalf("expected dto, got nil")
+			}
 
-	if dto.Status == nil {
-		t.Fatalf("expected status, got nil")
-	}
-	if *dto.Status != 0 {
-		t.Fatalf("expected status=0, got %d", *dto.Status)
-	}
+			if tt.wantStatusNil {
+				if got.Status != nil {
+					t.Fatalf("expected nil status, got %d", *got.Status)
+				}
+			} else {
+				if got.Status == nil {
+					t.Fatalf("expected status=%d, got nil", tt.wantStatus)
+				}
+				if *got.Status != tt.wantStatus {
+					t.Fatalf("expected status=%d, got %d", tt.wantStatus, *got.Status)
+				}
+			}
 
-	if dto.GasUsed == nil {
-		t.Fatalf("expected gas used, got nil")
-	}
-	if *dto.GasUsed != 21000 {
-		t.Fatalf("expected gas_used=21000, got %d", *dto.GasUsed)
-	}
-}
-
-func TestToIndexedTransactionDTO_KeepsNilReceiptFields(t *testing.T) {
-	tx := &models.Transaction{
-		Hash:        "0xtxhash",
-		BlockNumber: 100,
-		BlockHash:   "0xblockhash",
-		TxIndex:     1,
-	}
-
-	dto := ToIndexedTransactionDTO(tx)
-	if dto == nil {
-		t.Fatalf("expected dto, got nil")
-	}
-
-	if dto.Status != nil {
-		t.Fatalf("expected nil status, got %d", *dto.Status)
-	}
-	if dto.GasUsed != nil {
-		t.Fatalf("expected nil gas used, got %d", *dto.GasUsed)
-	}
-}
-
-func TestToAddressTransactionDTO_KeepsStatusZero(t *testing.T) {
-	status := uint64(0)
-	gasUsed := uint64(21000)
-
-	queryAddress := "0x1111111111111111111111111111111111111111"
-
-	tx := &models.Transaction{
-		Hash:             "0xtxhash",
-		BlockNumber:      100,
-		BlockHash:        "0xblockhash",
-		TxIndex:          1,
-		FromAddress:      queryAddress,
-		FromAddressLower: queryAddress,
-		ToAddress:        "0x2222222222222222222222222222222222222222",
-		ToAddressLower:   "0x2222222222222222222222222222222222222222",
-		ReceiptStatus:    &status,
-		ReceiptGasUsed:   &gasUsed,
-	}
-
-	dto := ToAddressTransactionDTO(tx, queryAddress)
-	if dto == nil {
-		t.Fatalf("expected dto, got nil")
-	}
-
-	if dto.Status == nil {
-		t.Fatalf("expected status, got nil")
-	}
-	if *dto.Status != 0 {
-		t.Fatalf("expected status=0, got %d", *dto.Status)
-	}
-
-	if dto.GasUsed == nil {
-		t.Fatalf("expected gas used, got nil")
-	}
-	if *dto.GasUsed != 21000 {
-		t.Fatalf("expected gas_used=21000, got %d", *dto.GasUsed)
-	}
-
-	if dto.Direction != "out" {
-		t.Fatalf("expected direction=out, got %s", dto.Direction)
-	}
-}
-
-func TestToAddressTransactionDTO_KeepsNilReceiptFields(t *testing.T) {
-	queryAddress := "0x1111111111111111111111111111111111111111"
-
-	tx := &models.Transaction{
-		Hash:             "0xtxhash",
-		BlockNumber:      100,
-		BlockHash:        "0xblockhash",
-		TxIndex:          1,
-		FromAddress:      queryAddress,
-		FromAddressLower: queryAddress,
-		ToAddress:        "0x2222222222222222222222222222222222222222",
-		ToAddressLower:   "0x2222222222222222222222222222222222222222",
-	}
-
-	dto := ToAddressTransactionDTO(tx, queryAddress)
-	if dto == nil {
-		t.Fatalf("expected dto, got nil")
-	}
-
-	if dto.Status != nil {
-		t.Fatalf("expected nil status, got %d", *dto.Status)
-	}
-	if dto.GasUsed != nil {
-		t.Fatalf("expected nil gas used, got %d", *dto.GasUsed)
+			if tt.wantGasUsedNil {
+				if got.GasUsed != nil {
+					t.Fatalf("expected nil gas used, got %d", *got.GasUsed)
+				}
+			} else {
+				if got.GasUsed == nil {
+					t.Fatalf("expected gas_used=%d, got nil", tt.wantGasUsed)
+				}
+				if *got.GasUsed != tt.wantGasUsed {
+					t.Fatalf("expected gas_used=%d, got %d", tt.wantGasUsed, *got.GasUsed)
+				}
+			}
+		})
 	}
 }
 

@@ -224,6 +224,101 @@ func TestTransactionRepository_GetTransactionByHash_Found(t *testing.T) {
 	}
 }
 
+func TestTransactionRepository_GetTransactionByHash_PreservesReceiptStatusNilZeroOne(t *testing.T) {
+	r, db := setupTransactionRepo(t)
+	ctx := context.Background()
+
+	statusZero := uint64(0)
+	statusOne := uint64(1)
+	gasUsed := uint64(21000)
+
+	pendingTx := newTestTransaction("0xpending", 100, 0)
+	// ReceiptStatus nil, ReceiptGasUsed nil
+
+	failedTx := newTestTransaction("0xfailed", 101, 0)
+	failedTx.ReceiptStatus = &statusZero
+	failedTx.ReceiptGasUsed = &gasUsed
+
+	successTx := newTestTransaction("0xsuccess", 102, 0)
+	successTx.ReceiptStatus = &statusOne
+	successTx.ReceiptGasUsed = &gasUsed
+
+	txs := []*models.Transaction{
+		pendingTx,
+		failedTx,
+		successTx,
+	}
+
+	for _, tx := range txs {
+		if err := db.Create(tx).Error; err != nil {
+			t.Fatalf("seed transaction %s: %v", tx.Hash, err)
+		}
+	}
+
+	gotPending, found, err := r.GetTransactionByHash(ctx, "0xpending")
+	if err != nil {
+		t.Fatalf("get pending transaction by hash: %v", err)
+	}
+	if !found {
+		t.Fatalf("expected pending transaction found=true, got false")
+	}
+	if gotPending == nil {
+		t.Fatalf("expected pending transaction, got nil")
+	}
+	if gotPending.ReceiptStatus != nil {
+		t.Fatalf("expected pending receipt status nil, got %d", *gotPending.ReceiptStatus)
+	}
+	if gotPending.ReceiptGasUsed != nil {
+		t.Fatalf("expected pending receipt gas used nil, got %d", *gotPending.ReceiptGasUsed)
+	}
+
+	gotFailed, found, err := r.GetTransactionByHash(ctx, "0xfailed")
+	if err != nil {
+		t.Fatalf("get failed transaction by hash: %v", err)
+	}
+	if !found {
+		t.Fatalf("expected failed transaction found=true, got false")
+	}
+	if gotFailed == nil {
+		t.Fatalf("expected failed transaction, got nil")
+	}
+	if gotFailed.ReceiptStatus == nil {
+		t.Fatalf("expected failed receipt status, got nil")
+	}
+	if *gotFailed.ReceiptStatus != uint64(0) {
+		t.Fatalf("expected failed receipt status=0, got %d", *gotFailed.ReceiptStatus)
+	}
+	if gotFailed.ReceiptGasUsed == nil {
+		t.Fatalf("expected failed receipt gas used, got nil")
+	}
+	if *gotFailed.ReceiptGasUsed != gasUsed {
+		t.Fatalf("expected failed receipt gas used=%d, got %d", gasUsed, *gotFailed.ReceiptGasUsed)
+	}
+
+	gotSuccess, found, err := r.GetTransactionByHash(ctx, "0xsuccess")
+	if err != nil {
+		t.Fatalf("get success transaction by hash: %v", err)
+	}
+	if !found {
+		t.Fatalf("expected success transaction found=true, got false")
+	}
+	if gotSuccess == nil {
+		t.Fatalf("expected success transaction, got nil")
+	}
+	if gotSuccess.ReceiptStatus == nil {
+		t.Fatalf("expected success receipt status, got nil")
+	}
+	if *gotSuccess.ReceiptStatus != uint64(1) {
+		t.Fatalf("expected success receipt status=1, got %d", *gotSuccess.ReceiptStatus)
+	}
+	if gotSuccess.ReceiptGasUsed == nil {
+		t.Fatalf("expected success receipt gas used, got nil")
+	}
+	if *gotSuccess.ReceiptGasUsed != gasUsed {
+		t.Fatalf("expected success receipt gas used=%d, got %d", gasUsed, *gotSuccess.ReceiptGasUsed)
+	}
+}
+
 func TestTransactionRepository_GetTransactionByHash_NotFound(t *testing.T) {
 	r, _ := setupTransactionRepo(t)
 	ctx := context.Background()

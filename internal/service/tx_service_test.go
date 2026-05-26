@@ -252,6 +252,120 @@ func TestTxService_GetIndexedTransactionByHash_Success(t *testing.T) {
 	}
 }
 
+func TestTxService_GetIndexedTransactionByHash_PreservesReceiptStatusNilZeroOne(t *testing.T) {
+	statusZero := uint64(0)
+	statusOne := uint64(1)
+	gasUsed := uint64(21000)
+
+	tests := []struct {
+		name           string
+		setupTx        func(hash string) *models.Transaction
+		wantStatusNil  bool
+		wantStatus     uint64
+		wantGasUsedNil bool
+		wantGasUsed    uint64
+	}{
+		{
+			name: "receipt not synced keeps nil status and nil gas used",
+			setupTx: func(hash string) *models.Transaction {
+				tx := testTransactionModel(hash)
+				tx.ReceiptStatus = nil
+				tx.ReceiptGasUsed = nil
+				return tx
+			},
+			wantStatusNil:  true,
+			wantGasUsedNil: true,
+		},
+		{
+			name: "failed receipt keeps status zero",
+			setupTx: func(hash string) *models.Transaction {
+				tx := testTransactionModel(hash)
+				tx.ReceiptStatus = &statusZero
+				tx.ReceiptGasUsed = &gasUsed
+				return tx
+			},
+			wantStatusNil:  false,
+			wantStatus:     0,
+			wantGasUsedNil: false,
+			wantGasUsed:    gasUsed,
+		},
+		{
+			name: "successful receipt keeps status one",
+			setupTx: func(hash string) *models.Transaction {
+				tx := testTransactionModel(hash)
+				tx.ReceiptStatus = &statusOne
+				tx.ReceiptGasUsed = &gasUsed
+				return tx
+			},
+			wantStatusNil:  false,
+			wantStatus:     1,
+			wantGasUsedNil: false,
+			wantGasUsed:    gasUsed,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, repo, rpc := setupTxTestService(t)
+
+			hash := validTxServiceTxHash()
+			repo.tx = tt.setupTx(hash)
+			repo.found = true
+
+			got, err := svc.GetIndexedTransactionByHash(context.Background(), hash)
+			if err != nil {
+				t.Fatalf("expected nil error, got %v", err)
+			}
+
+			if got == nil {
+				t.Fatalf("expected result, got nil")
+			}
+
+			if !repo.called {
+				t.Fatalf("expected repo to be called")
+			}
+
+			if repo.gotHash != hash {
+				t.Fatalf("expected repo hash=%s, got %s", hash, repo.gotHash)
+			}
+
+			if rpc.called {
+				t.Fatalf("expected rpc not to be called")
+			}
+
+			if got.Hash != hash {
+				t.Fatalf("expected hash=%s, got %s", hash, got.Hash)
+			}
+
+			if tt.wantStatusNil {
+				if got.Status != nil {
+					t.Fatalf("expected nil status, got %d", *got.Status)
+				}
+			} else {
+				if got.Status == nil {
+					t.Fatalf("expected status=%d, got nil", tt.wantStatus)
+				}
+				if *got.Status != tt.wantStatus {
+					t.Fatalf("expected status=%d, got %d", tt.wantStatus, *got.Status)
+				}
+			}
+
+			if tt.wantGasUsedNil {
+				if got.GasUsed != nil {
+					t.Fatalf("expected nil gas used, got %d", *got.GasUsed)
+				}
+			} else {
+				if got.GasUsed == nil {
+					t.Fatalf("expected gas_used=%d, got nil", tt.wantGasUsed)
+				}
+				if *got.GasUsed != tt.wantGasUsed {
+					t.Fatalf("expected gas_used=%d, got %d", tt.wantGasUsed, *got.GasUsed)
+				}
+			}
+		})
+	}
+}
+
 func TestTxService_GetIndexedTransactionByHash_ReturnsErrInvalidTxHash(t *testing.T) {
 	svc, repo, _ := setupTxTestService(t)
 

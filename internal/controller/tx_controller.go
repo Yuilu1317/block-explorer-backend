@@ -7,10 +7,10 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// TxService defines the business logic abstraction for transaction queries.
+// TransactionQueryService defines the business logic abstraction for transaction queries.
 // The controller depends on this interface instead of a concrete implementation,
 // which enables loose coupling and easier testing.
-type TxService interface {
+type TransactionQueryService interface {
 	GetTxDetailByHashFromRPC(ctx context.Context, hash string) (*types.TxDetailDTO, error)
 	GetIndexedTransactionByHash(ctx context.Context, hash string) (*types.IndexedTransactionDTO, error)
 }
@@ -18,14 +18,14 @@ type TxService interface {
 // TxController handles HTTP requests related to transactions.
 // It delegates business logic to the TxService layer.
 type TxController struct {
-	txService TxService
+	transactionQueryService TransactionQueryService
 }
 
 // NewTxController creates a new TxController instance with dependency injection.
 // The service layer is passed in from the outside, improving modularity and testability.
-func NewTxController(txService TxService) *TxController {
+func NewTxController(transactionQueryService TransactionQueryService) *TxController {
 	return &TxController{
-		txService: txService,
+		transactionQueryService: transactionQueryService,
 	}
 }
 
@@ -43,7 +43,7 @@ func (ctl *TxController) GetTxDetailByHashFromRPC(c *gin.Context) {
 	}
 
 	// Delegate the business logic to the service layer
-	tx, err := ctl.txService.GetTxDetailByHashFromRPC(ctx, hash)
+	tx, err := ctl.transactionQueryService.GetTxDetailByHashFromRPC(ctx, hash)
 	// Handle errors and map them to appropriate HTTP status codes
 
 	if err != nil {
@@ -64,7 +64,7 @@ func (ctl *TxController) GetIndexedTransactionByHash(c *gin.Context) {
 		return
 	}
 
-	tx, err := ctl.txService.GetIndexedTransactionByHash(ctx, hash)
+	tx, err := ctl.transactionQueryService.GetIndexedTransactionByHash(ctx, hash)
 	if err != nil {
 		types.WriteError(c, err)
 		return
