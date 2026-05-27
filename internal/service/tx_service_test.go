@@ -122,7 +122,7 @@ func setupTxTestService(t *testing.T) (*TxService, *fakeTxServiceRepo, *fakeTxSe
 	rpc := &fakeTxServiceRPC{}
 	repo := &fakeTxServiceRepo{}
 
-	svc := NewTxService(rpc, repo)
+	svc := NewTxService(rpc, repo, repo)
 
 	return svc, repo, rpc
 }

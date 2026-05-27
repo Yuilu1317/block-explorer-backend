@@ -14,7 +14,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 )
 
-type fakeBlockRPC struct {
+type fakeChainBlockReader struct {
 	block *ethtypes.Block
 	err   error
 
@@ -28,7 +28,7 @@ type fakeBlockRPC struct {
 	getChainIDCalled bool
 }
 
-func (f *fakeBlockRPC) GetBlockByNumber(ctx context.Context, number uint64) (*ethtypes.Block, error) {
+func (f *fakeChainBlockReader) GetBlockByNumber(ctx context.Context, number uint64) (*ethtypes.Block, error) {
 	if f.onGetBlock != nil {
 		f.onGetBlock(number)
 	}
@@ -49,7 +49,7 @@ func (f *fakeBlockRPC) GetBlockByNumber(ctx context.Context, number uint64) (*et
 	return f.block, nil
 }
 
-func (f *fakeBlockRPC) GetChainID(ctx context.Context) (*big.Int, error) {
+func (f *fakeChainBlockReader) GetChainID(ctx context.Context) (*big.Int, error) {
 	f.getChainIDCalled = true
 	if f.chainIDErr != nil {
 		return nil, f.chainIDErr
@@ -60,7 +60,7 @@ func (f *fakeBlockRPC) GetChainID(ctx context.Context) (*big.Int, error) {
 	return big.NewInt(1), nil
 }
 
-type fakeBlockRepo struct {
+type fakeBlockSyncStore struct {
 	block *models.Block
 	found bool
 	err   error
@@ -83,7 +83,7 @@ type fakeBlockRepo struct {
 	markBlockReceiptsSyncFailedErr         error
 }
 
-func (f *fakeBlockRepo) InsertBlockWithTransactions(
+func (f *fakeBlockSyncStore) InsertBlockWithTransactions(
 	ctx context.Context,
 	block *models.Block,
 	txs []*models.Transaction,
@@ -104,7 +104,7 @@ func (f *fakeBlockRepo) InsertBlockWithTransactions(
 	return nil
 }
 
-func (f *fakeBlockRepo) GetBlockByNumber(ctx context.Context, number uint64) (*models.Block, bool, error) {
+func (f *fakeBlockSyncStore) GetBlockByNumber(ctx context.Context, number uint64) (*models.Block, bool, error) {
 	if f.err != nil {
 		return nil, false, f.err
 	}
@@ -127,7 +127,7 @@ func (f *fakeBlockRepo) GetBlockByNumber(ctx context.Context, number uint64) (*m
 	return nil, false, nil
 }
 
-func (f *fakeBlockRepo) MarkBlockReceiptsSynced(ctx context.Context, blockNumber uint64) error {
+func (f *fakeBlockSyncStore) MarkBlockReceiptsSynced(ctx context.Context, blockNumber uint64) error {
 	f.markBlockReceiptsSyncedCalled = true
 	f.markBlockReceiptsSyncedBlockNumber = blockNumber
 
@@ -138,7 +138,7 @@ func (f *fakeBlockRepo) MarkBlockReceiptsSynced(ctx context.Context, blockNumber
 	return nil
 }
 
-func (f *fakeBlockRepo) MarkBlockReceiptsSyncFailed(ctx context.Context, blockNumber uint64, reason string) error {
+func (f *fakeBlockSyncStore) MarkBlockReceiptsSyncFailed(ctx context.Context, blockNumber uint64, reason string) error {
 	f.markBlockReceiptsSyncFailedCalled = true
 	f.markBlockReceiptsSyncFailedBlockNumber = blockNumber
 	f.markBlockReceiptsSyncFailedReason = reason
@@ -150,14 +150,14 @@ func (f *fakeBlockRepo) MarkBlockReceiptsSyncFailed(ctx context.Context, blockNu
 	return nil
 }
 
-type fakeTransactionReceiptSyncer struct {
+type fakeBlockReceiptSyncer struct {
 	called         bool
 	calls          int
 	gotBlockNumber uint64
 	err            error
 }
 
-func (f *fakeTransactionReceiptSyncer) SyncBlockTransactionReceipts(ctx context.Context, blockNumber uint64) error {
+func (f *fakeBlockReceiptSyncer) SyncBlockTransactionReceipts(ctx context.Context, blockNumber uint64) error {
 	f.called = true
 	f.calls++
 	f.gotBlockNumber = blockNumber
@@ -169,7 +169,7 @@ func (f *fakeTransactionReceiptSyncer) SyncBlockTransactionReceipts(ctx context.
 	return nil
 }
 
-type fakeTransactionRepository struct {
+type fakeTransactionConflictReader struct {
 	existingTxs map[string]*models.Transaction
 	err         error
 
@@ -177,7 +177,7 @@ type fakeTransactionRepository struct {
 	hashes []string
 }
 
-func (f *fakeTransactionRepository) GetTransactionsByHashes(
+func (f *fakeTransactionConflictReader) GetTransactionsByHashes(
 	ctx context.Context,
 	hashes []string,
 ) (map[string]*models.Transaction, error) {
@@ -230,25 +230,25 @@ func assertInsertedBlockSyncState(
 
 type blockServiceTestEnv struct {
 	svc           *BlockService
-	blockRepo     *fakeBlockRepo
-	blockRPC      *fakeBlockRPC
-	txRepo        *fakeTransactionRepository
-	receiptSyncer *fakeTransactionReceiptSyncer
+	blockRPC      *fakeChainBlockReader
+	blockRepo     *fakeBlockSyncStore
+	receiptSyncer *fakeBlockReceiptSyncer
+	txRepo        *fakeTransactionConflictReader
 }
 
 func setupBlockServiceTestEnv(t *testing.T, startBlock uint64) *blockServiceTestEnv {
 	t.Helper()
 
-	rpc := &fakeBlockRPC{}
-	blockRepo := &fakeBlockRepo{}
-	txRepo := &fakeTransactionRepository{}
-	receiptSyncer := &fakeTransactionReceiptSyncer{}
+	rpc := &fakeChainBlockReader{}
+	blockRepo := &fakeBlockSyncStore{}
+	receiptSyncer := &fakeBlockReceiptSyncer{}
+	txRepo := &fakeTransactionConflictReader{}
 
 	svc := NewBlockService(
 		rpc,
 		blockRepo,
-		txRepo,
 		receiptSyncer,
+		txRepo,
 		startBlock,
 	)
 
@@ -261,7 +261,7 @@ func setupBlockServiceTestEnv(t *testing.T, startBlock uint64) *blockServiceTest
 	}
 }
 
-func setupTestService(t *testing.T) (*BlockService, *fakeBlockRepo, *fakeBlockRPC) {
+func setupTestService(t *testing.T) (*BlockService, *fakeBlockSyncStore, *fakeChainBlockReader) {
 	t.Helper()
 
 	env := setupBlockServiceTestEnv(t, 20)
@@ -272,7 +272,7 @@ func setupTestService(t *testing.T) (*BlockService, *fakeBlockRepo, *fakeBlockRP
 func setupTestServiceWithStartBlock(
 	t *testing.T,
 	startBlock uint64,
-) (*BlockService, *fakeBlockRepo, *fakeBlockRPC) {
+) (*BlockService, *fakeBlockSyncStore, *fakeChainBlockReader) {
 	t.Helper()
 
 	env := setupBlockServiceTestEnv(t, startBlock)
@@ -282,7 +282,7 @@ func setupTestServiceWithStartBlock(
 
 func setupTestServiceWithReceiptSyncer(
 	t *testing.T,
-) (*BlockService, *fakeBlockRepo, *fakeBlockRPC, *fakeTransactionReceiptSyncer) {
+) (*BlockService, *fakeBlockSyncStore, *fakeChainBlockReader, *fakeBlockReceiptSyncer) {
 	t.Helper()
 
 	env := setupBlockServiceTestEnv(t, 20)
@@ -293,12 +293,12 @@ func setupTestServiceWithReceiptSyncer(
 func setupTestServiceWithReceiptSyncerAndStartBlock(
 	t *testing.T,
 	startBlock uint64,
-) (*BlockService, *fakeBlockRepo, *fakeBlockRPC, *fakeTransactionReceiptSyncer) {
+) (*BlockService, *fakeChainBlockReader, *fakeBlockSyncStore, *fakeBlockReceiptSyncer) {
 	t.Helper()
 
 	env := setupBlockServiceTestEnv(t, startBlock)
 
-	return env.svc, env.blockRepo, env.blockRPC, env.receiptSyncer
+	return env.svc, env.blockRPC, env.blockRepo, env.receiptSyncer
 }
 
 func TestBlockService_GetBlockByNumber_DBHit(t *testing.T) {

@@ -15,19 +15,23 @@ import (
 	gethtypes "github.com/ethereum/go-ethereum/core/types"
 )
 
-type TxRPC interface {
+type ChainTransactionReader interface {
 	GetTransactionByHash(ctx context.Context, hash string) (*types.TxRaw, error)
 	GetTransactionReceipt(ctx context.Context, hash string) (*gethtypes.Receipt, error)
 }
 
-type TxRepo interface {
+type IndexedTransactionReader interface {
 	GetTransactionByHash(ctx context.Context, hash string) (*models.Transaction, bool, error)
+}
+
+type TransactionReceiptStore interface {
 	UpdateTransactionReceiptByHash(
 		ctx context.Context,
 		hash string,
 		status *uint64,
 		gasUsed *uint64,
 	) error
+
 	ListTransactionsMissingReceiptByBlockNumber(
 		ctx context.Context,
 		blockNumber uint64,
@@ -35,15 +39,20 @@ type TxRepo interface {
 }
 
 type TxService struct {
-	// txRPC is the RPC dependency used to fetch transaction data from the blockchain
-	txRPC  TxRPC
-	txRepo TxRepo
+	chainTransactionReader   ChainTransactionReader
+	indexedTransactionReader IndexedTransactionReader
+	transactionReceiptStore  TransactionReceiptStore
 }
 
-func NewTxService(txRPC TxRPC, txRepo TxRepo) *TxService {
+func NewTxService(
+	chainTransactionReader ChainTransactionReader,
+	indexedTransactionReader IndexedTransactionReader,
+	transactionReceiptStore TransactionReceiptStore,
+) *TxService {
 	return &TxService{
-		txRPC:  txRPC,
-		txRepo: txRepo,
+		chainTransactionReader:   chainTransactionReader,
+		indexedTransactionReader: indexedTransactionReader,
+		transactionReceiptStore:  transactionReceiptStore,
 	}
 }
 
@@ -55,7 +64,7 @@ func (s *TxService) GetTxDetailByHashFromRPC(ctx context.Context, hash string) (
 		return nil, types.ErrInvalidTxHash
 	}
 
-	raw, err := s.txRPC.GetTransactionByHash(ctx, hash)
+	raw, err := s.chainTransactionReader.GetTransactionByHash(ctx, hash)
 	if err != nil {
 		return nil, fmt.Errorf("get transaction by hash %s: %w", hash, err)
 	}
@@ -71,7 +80,7 @@ func (s *TxService) GetIndexedTransactionByHash(ctx context.Context, hash string
 		return nil, types.ErrInvalidTxHash
 	}
 
-	tx, found, err := s.txRepo.GetTransactionByHash(ctx, hash)
+	tx, found, err := s.indexedTransactionReader.GetTransactionByHash(ctx, hash)
 	if err != nil {
 		return nil, fmt.Errorf("get indexed transaction by hash %s from db: %w", hash, err)
 	}
@@ -108,13 +117,13 @@ func (s *TxService) validateReceiptMatchesTransaction(tx *models.Transaction, re
 }
 
 func (s *TxService) SyncBlockTransactionReceipts(ctx context.Context, blockNumber uint64) error {
-	txs, err := s.txRepo.ListTransactionsMissingReceiptByBlockNumber(ctx, blockNumber)
+	txs, err := s.transactionReceiptStore.ListTransactionsMissingReceiptByBlockNumber(ctx, blockNumber)
 	if err != nil {
 		return fmt.Errorf("service: list missing receipt transactions for block %d: %w", blockNumber, err)
 	}
 
 	for _, tx := range txs {
-		receipt, err := s.txRPC.GetTransactionReceipt(ctx, tx.Hash)
+		receipt, err := s.chainTransactionReader.GetTransactionReceipt(ctx, tx.Hash)
 		if err != nil {
 			if errors.Is(err, types.ErrTxReceiptNotFound) {
 				continue
@@ -127,7 +136,7 @@ func (s *TxService) SyncBlockTransactionReceipts(ctx context.Context, blockNumbe
 		status := receipt.Status
 		gasUsed := receipt.GasUsed
 
-		if err := s.txRepo.UpdateTransactionReceiptByHash(ctx, tx.Hash, &status, &gasUsed); err != nil {
+		if err := s.transactionReceiptStore.UpdateTransactionReceiptByHash(ctx, tx.Hash, &status, &gasUsed); err != nil {
 			return fmt.Errorf("service: update transaction receipt for tx %s: %w", tx.Hash, err)
 		}
 	}

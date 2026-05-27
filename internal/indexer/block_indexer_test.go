@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-type fakeBlockRPC struct {
+type fakeSyncTargetReader struct {
 	targetNumber uint64
 	err          error
 
@@ -15,13 +15,13 @@ type fakeBlockRPC struct {
 	gotTag          string
 }
 
-func (f *fakeBlockRPC) GetBlockNumberByTag(ctx context.Context, tag string) (uint64, error) {
+func (f *fakeSyncTargetReader) GetBlockNumberByTag(ctx context.Context, tag string) (uint64, error) {
 	f.getTargetCalled = true
 	f.gotTag = tag
 	return f.targetNumber, f.err
 }
 
-type fakeBlockRepository struct {
+type fakeBlockSyncProgressReader struct {
 	latestNumber uint64
 	exists       bool
 	err          error
@@ -29,37 +29,37 @@ type fakeBlockRepository struct {
 	getLatestCalled bool
 }
 
-func (f *fakeBlockRepository) GetLatestFullySyncedBlockNumber(ctx context.Context) (uint64, bool, error) {
+func (f *fakeBlockSyncProgressReader) GetLatestFullySyncedBlockNumber(ctx context.Context) (uint64, bool, error) {
 	f.getLatestCalled = true
 	return f.latestNumber, f.exists, f.err
 }
 
-type fakeBlockService struct {
+type fakeBlockSynchronizer struct {
 	syncCalled  bool
 	syncedBlock uint64
 	err         error
 }
 
-func (f *fakeBlockService) SyncBlockToDB(ctx context.Context, number uint64) error {
+func (f *fakeBlockSynchronizer) SyncBlockToDB(ctx context.Context, number uint64) error {
 	f.syncCalled = true
 	f.syncedBlock = number
 	return f.err
 }
-func setupTestIndexer(t *testing.T) (*BlockIndexer, *fakeBlockRPC, *fakeBlockRepository, *fakeBlockService) {
+func setupTestIndexer(t *testing.T) (*BlockIndexer, *fakeSyncTargetReader, *fakeBlockSyncProgressReader, *fakeBlockSynchronizer) {
 	t.Helper()
 	return setupTestIndexerWithConfig(t, "safe", 0)
 }
 
-func setupTestIndexerWithConfig(t *testing.T, syncTarget string, startBlock uint64) (*BlockIndexer, *fakeBlockRPC, *fakeBlockRepository, *fakeBlockService) {
+func setupTestIndexerWithConfig(t *testing.T, syncTarget string, startBlock uint64) (*BlockIndexer, *fakeSyncTargetReader, *fakeBlockSyncProgressReader, *fakeBlockSynchronizer) {
 	t.Helper()
 
-	rpc := &fakeBlockRPC{}
-	repo := &fakeBlockRepository{}
-	service := &fakeBlockService{}
+	targetReader := &fakeSyncTargetReader{}
+	progressReader := &fakeBlockSyncProgressReader{}
+	synchronizer := &fakeBlockSynchronizer{}
 
-	svc := NewBlockIndexer(rpc, repo, service, syncTarget, startBlock)
+	indexer := NewBlockIndexer(targetReader, progressReader, synchronizer, syncTarget, startBlock)
 
-	return svc, rpc, repo, service
+	return indexer, targetReader, progressReader, synchronizer
 }
 
 func TestBlockIndexer_GetNextBlockToSync_ReturnsDBLatestPlusOne(t *testing.T) {

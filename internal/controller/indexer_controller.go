@@ -8,23 +8,23 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-type Indexer interface {
+type BlockIndexer interface {
 	GetNextBlockToSync(ctx context.Context) (*types.IndexerStatus, error)
 	RunIndexerOnce(ctx context.Context) (*types.IndexerOnceResult, error)
 }
 
 type IndexerController struct {
-	indexer Indexer
+	blockIndexer BlockIndexer
 }
 
-func NewIndexerController(indexer Indexer) *IndexerController {
-	return &IndexerController{indexer: indexer}
+func NewIndexerController(blockIndexer BlockIndexer) *IndexerController {
+	return &IndexerController{blockIndexer: blockIndexer}
 }
 
 func (ctl *IndexerController) GetSyncStatus(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	status, err := ctl.indexer.GetNextBlockToSync(ctx)
+	status, err := ctl.blockIndexer.GetNextBlockToSync(ctx)
 	if err != nil {
 		log.Printf("[indexer-status] error: %v\n", err)
 		types.WriteError(c, err)
@@ -36,7 +36,7 @@ func (ctl *IndexerController) GetSyncStatus(c *gin.Context) {
 func (ctl *IndexerController) RunOnce(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	onceResult, err := ctl.indexer.RunIndexerOnce(ctx)
+	onceResult, err := ctl.blockIndexer.RunIndexerOnce(ctx)
 	if err != nil {
 		types.WriteError(c, err)
 		return

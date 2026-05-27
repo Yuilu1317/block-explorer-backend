@@ -8,7 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-type AddressService interface {
+type AddressQueryService interface {
 	GetAddress(ctx context.Context, address string) (*types.AddressInfo, error)
 	GetIndexedTransactionsByAddress(
 		ctx context.Context,
@@ -19,12 +19,12 @@ type AddressService interface {
 }
 
 type AddressController struct {
-	addressService AddressService
+	addressQueryService AddressQueryService
 }
 
-func NewAddressController(addressService AddressService) *AddressController {
+func NewAddressController(addressService AddressQueryService) *AddressController {
 	return &AddressController{
-		addressService: addressService,
+		addressQueryService: addressService,
 	}
 }
 
@@ -37,7 +37,7 @@ func (ctl *AddressController) GetAddress(c *gin.Context) {
 		return
 	}
 
-	addressInfo, err := ctl.addressService.GetAddress(ctx, address)
+	addressInfo, err := ctl.addressQueryService.GetAddress(ctx, address)
 	if err != nil {
 		types.WriteError(c, err)
 		return
@@ -75,7 +75,7 @@ func (ctl *AddressController) GetIndexedTransactionsByAddress(c *gin.Context) {
 		pageSize = parsed
 	}
 
-	result, err := ctl.addressService.GetIndexedTransactionsByAddress(
+	result, err := ctl.addressQueryService.GetIndexedTransactionsByAddress(
 		ctx,
 		address,
 		page,

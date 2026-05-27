@@ -10,18 +10,25 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-type BlockService interface {
+type BlockQueryService interface {
 	GetBlockByNumber(ctx context.Context, number uint64) (model.BlockQueryResult, error)
+}
+
+type BlockSyncService interface {
 	SyncBlockToDB(ctx context.Context, number uint64) error
 	SyncBlockRangeToDB(ctx context.Context, start, end uint64) (*types.BlockRangeSyncResult, error)
 }
 
 type BlockController struct {
-	blockService BlockService
+	blockQueryService BlockQueryService
+	blockSyncService  BlockSyncService
 }
 
-func NewBlockController(blockService BlockService) *BlockController {
-	return &BlockController{blockService: blockService}
+func NewBlockController(blockQueryService BlockQueryService, blockSyncService BlockSyncService) *BlockController {
+	return &BlockController{
+		blockQueryService: blockQueryService,
+		blockSyncService:  blockSyncService,
+	}
 }
 
 func parseBlockNumber(c *gin.Context) (uint64, bool) {
@@ -48,7 +55,7 @@ func (ctl *BlockController) GetBlock(c *gin.Context) {
 		return
 	}
 
-	result, err := ctl.blockService.GetBlockByNumber(ctx, number)
+	result, err := ctl.blockQueryService.GetBlockByNumber(ctx, number)
 	if err != nil {
 		types.WriteError(c, err)
 		return
@@ -66,7 +73,7 @@ func (ctl *BlockController) SyncBlock(c *gin.Context) {
 		return
 	}
 
-	err := ctl.blockService.SyncBlockToDB(ctx, number)
+	err := ctl.blockSyncService.SyncBlockToDB(ctx, number)
 	if err != nil {
 		types.WriteError(c, err)
 		return
@@ -97,7 +104,7 @@ func (ctl *BlockController) SyncBlockRange(c *gin.Context) {
 		return
 	}
 
-	result, err := ctl.blockService.SyncBlockRangeToDB(ctx, start, end)
+	result, err := ctl.blockSyncService.SyncBlockRangeToDB(ctx, start, end)
 	if err != nil {
 		types.WriteError(c, err)
 		return

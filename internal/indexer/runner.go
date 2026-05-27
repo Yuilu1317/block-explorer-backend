@@ -9,21 +9,21 @@ import (
 	"time"
 )
 
-type LoopIndexer interface {
+type IndexerRunner interface {
 	RunIndexerOnce(ctx context.Context) (*types.IndexerOnceResult, error)
 }
 
 type Runner struct {
-	indexer    LoopIndexer
-	interval   time.Duration
-	runTimeout time.Duration
+	indexerRunner IndexerRunner
+	interval      time.Duration
+	runTimeout    time.Duration
 }
 
-func NewRunner(indexer LoopIndexer, interval time.Duration, runTimeout time.Duration) *Runner {
+func NewRunner(indexerRunner IndexerRunner, interval time.Duration, runTimeout time.Duration) *Runner {
 	return &Runner{
-		indexer:    indexer,
-		interval:   interval,
-		runTimeout: runTimeout,
+		indexerRunner: indexerRunner,
+		interval:      interval,
+		runTimeout:    runTimeout,
 	}
 }
 
@@ -39,7 +39,7 @@ func (r *Runner) Start(ctx context.Context) {
 		}
 
 		runCtx, cancel := context.WithTimeout(ctx, r.runTimeout)
-		result, err := r.indexer.RunIndexerOnce(runCtx)
+		result, err := r.indexerRunner.RunIndexerOnce(runCtx)
 		cancel()
 
 		// Do not stop the runner on a single failure.

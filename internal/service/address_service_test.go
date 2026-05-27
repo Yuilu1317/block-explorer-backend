@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-type fakeAddressRPC struct {
+type fakeAddressStateReader struct {
 	Balance string
 	Nonce   uint64
 	Code    string
@@ -24,7 +24,7 @@ type fakeAddressRPC struct {
 	gotAddress    string
 }
 
-func (f *fakeAddressRPC) GetBalance(ctx context.Context, address string) (string, error) {
+func (f *fakeAddressStateReader) GetBalance(ctx context.Context, address string) (string, error) {
 	f.balanceCalled = true
 	f.gotAddress = address
 	if f.balanceErr != nil {
@@ -33,7 +33,7 @@ func (f *fakeAddressRPC) GetBalance(ctx context.Context, address string) (string
 	return f.Balance, nil
 }
 
-func (f *fakeAddressRPC) GetNonce(ctx context.Context, address string) (uint64, error) {
+func (f *fakeAddressStateReader) GetNonce(ctx context.Context, address string) (uint64, error) {
 	f.nonceCalled = true
 	f.gotAddress = address
 	if f.nonceErr != nil {
@@ -42,7 +42,7 @@ func (f *fakeAddressRPC) GetNonce(ctx context.Context, address string) (uint64, 
 	return f.Nonce, nil
 }
 
-func (f *fakeAddressRPC) GetCode(ctx context.Context, address string) (string, error) {
+func (f *fakeAddressStateReader) GetCode(ctx context.Context, address string) (string, error) {
 	f.codeCalled = true
 	f.gotAddress = address
 	if f.codeErr != nil {
@@ -51,7 +51,7 @@ func (f *fakeAddressRPC) GetCode(ctx context.Context, address string) (string, e
 	return f.Code, nil
 }
 
-type fakeTxRepoToAddressService struct {
+type fakeAddressTransactionReader struct {
 	listTransactions []models.Transaction
 	err              error
 
@@ -61,7 +61,7 @@ type fakeTxRepoToAddressService struct {
 	gotOffset  int
 }
 
-func (f *fakeTxRepoToAddressService) ListTransactionsByAddress(
+func (f *fakeAddressTransactionReader) ListTransactionsByAddress(
 	ctx context.Context,
 	address string,
 	limit int,
@@ -78,13 +78,13 @@ func (f *fakeTxRepoToAddressService) ListTransactionsByAddress(
 	return f.listTransactions, nil
 }
 
-func setupAddressServiceTest() (*AddressService, *fakeAddressRPC, *fakeTxRepoToAddressService) {
-	fakeRPC := &fakeAddressRPC{}
-	fakeTxRepo := &fakeTxRepoToAddressService{}
+func setupAddressServiceTest() (*AddressService, *fakeAddressStateReader, *fakeAddressTransactionReader) {
+	fakeAddressStateReader := &fakeAddressStateReader{}
+	fakeAddressTransactionReader := &fakeAddressTransactionReader{}
 
-	s := NewAddressService(fakeRPC, fakeTxRepo)
+	s := NewAddressService(fakeAddressStateReader, fakeAddressTransactionReader)
 
-	return s, fakeRPC, fakeTxRepo
+	return s, fakeAddressStateReader, fakeAddressTransactionReader
 }
 
 func newAddressServiceTestTransaction(

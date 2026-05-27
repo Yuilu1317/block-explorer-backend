@@ -6,49 +6,49 @@ import (
 	"fmt"
 )
 
-type BlockRPC interface {
+type SyncTargetReader interface {
 	GetBlockNumberByTag(ctx context.Context, tag string) (uint64, error)
 }
 
-type BlockRepository interface {
+type BlockSyncProgressReader interface {
 	GetLatestFullySyncedBlockNumber(ctx context.Context) (uint64, bool, error)
 }
 
-type BlockService interface {
+type BlockSynchronizer interface {
 	SyncBlockToDB(ctx context.Context, number uint64) error
 }
 
 type BlockIndexer struct {
-	blockRPC     BlockRPC
-	blockRepo    BlockRepository
-	blockService BlockService
-	syncTarget   string
-	startBlock   uint64
+	syncTargetReader        SyncTargetReader
+	blockSyncProgressReader BlockSyncProgressReader
+	blockSynchronizer       BlockSynchronizer
+	syncTarget              string
+	startBlock              uint64
 }
 
 func NewBlockIndexer(
-	blockRPC BlockRPC,
-	blockRepo BlockRepository,
-	blockService BlockService,
+	syncTargetReader SyncTargetReader,
+	blockSyncProgressReader BlockSyncProgressReader,
+	blockSynchronizer BlockSynchronizer,
 	syncTarget string,
 	startBlock uint64,
 ) *BlockIndexer {
 	return &BlockIndexer{
-		blockRPC:     blockRPC,
-		blockRepo:    blockRepo,
-		blockService: blockService,
-		syncTarget:   syncTarget,
-		startBlock:   startBlock,
+		syncTargetReader:        syncTargetReader,
+		blockSyncProgressReader: blockSyncProgressReader,
+		blockSynchronizer:       blockSynchronizer,
+		syncTarget:              syncTarget,
+		startBlock:              startBlock,
 	}
 }
 
 func (s *BlockIndexer) GetNextBlockToSync(ctx context.Context) (*types.IndexerStatus, error) {
-	dbLatest, exists, err := s.blockRepo.GetLatestFullySyncedBlockNumber(ctx)
+	dbLatest, exists, err := s.blockSyncProgressReader.GetLatestFullySyncedBlockNumber(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("db latest block: %w", err)
 	}
 
-	rpcTarget, err := s.blockRPC.GetBlockNumberByTag(ctx, s.syncTarget)
+	rpcTarget, err := s.syncTargetReader.GetBlockNumberByTag(ctx, s.syncTarget)
 	if err != nil {
 		return nil, fmt.Errorf("rpc target block by tag %s: %w", s.syncTarget, err)
 	}
@@ -91,7 +91,7 @@ func (s *BlockIndexer) RunIndexerOnce(ctx context.Context) (*types.IndexerOnceRe
 		return result, nil
 	}
 
-	if err := s.blockService.SyncBlockToDB(ctx, status.Next); err != nil {
+	if err := s.blockSynchronizer.SyncBlockToDB(ctx, status.Next); err != nil {
 		return nil, fmt.Errorf("run indexer once: sync block %d: %w", status.Next, err)
 	}
 

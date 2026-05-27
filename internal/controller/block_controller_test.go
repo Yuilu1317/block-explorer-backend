@@ -53,7 +53,7 @@ func setupTestController(t *testing.T) (*BlockController, *fakeBlockService) {
 
 	service := &fakeBlockService{}
 
-	controller := NewBlockController(service)
+	controller := NewBlockController(service, service)
 
 	return controller, service
 }

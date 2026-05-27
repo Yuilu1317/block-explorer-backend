@@ -12,7 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-type fakeAddressService struct {
+type fakeAddressQueryService struct {
 	addressInfo   *types.AddressInfo
 	addressTxList *types.AddressTransactionListDTO
 
@@ -26,7 +26,7 @@ type fakeAddressService struct {
 	gotPageSize  int
 }
 
-func (f *fakeAddressService) GetAddress(ctx context.Context, address string) (*types.AddressInfo, error) {
+func (f *fakeAddressQueryService) GetAddress(ctx context.Context, address string) (*types.AddressInfo, error) {
 	f.calledInfo = true
 	f.gotAddress = address
 	if f.infoErr != nil {
@@ -35,7 +35,7 @@ func (f *fakeAddressService) GetAddress(ctx context.Context, address string) (*t
 	return f.addressInfo, nil
 }
 
-func (f *fakeAddressService) GetIndexedTransactionsByAddress(
+func (f *fakeAddressQueryService) GetIndexedTransactionsByAddress(
 	ctx context.Context,
 	address string,
 	page int,
@@ -51,10 +51,10 @@ func (f *fakeAddressService) GetIndexedTransactionsByAddress(
 	return f.addressTxList, nil
 }
 
-func setupTestAddressController(t *testing.T) (*AddressController, *fakeAddressService) {
+func setupTestAddressController(t *testing.T) (*AddressController, *fakeAddressQueryService) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
-	svc := &fakeAddressService{}
+	svc := &fakeAddressQueryService{}
 	ctrl := NewAddressController(svc)
 	return ctrl, svc
 }

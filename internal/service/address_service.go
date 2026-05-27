@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-type AddressRPC interface {
+type AddressStateReader interface {
 	GetBalance(ctx context.Context, address string) (string, error)
 	GetNonce(ctx context.Context, address string) (uint64, error)
 	GetCode(ctx context.Context, address string) (string, error)
@@ -26,13 +26,13 @@ type AddressTransactionReader interface {
 }
 
 type AddressService struct {
-	addressRPC               AddressRPC
+	addressStateReader       AddressStateReader
 	addressTransactionReader AddressTransactionReader
 }
 
-func NewAddressService(addressRPC AddressRPC, txRepoToAddressService AddressTransactionReader) *AddressService {
+func NewAddressService(addressStateReader AddressStateReader, txRepoToAddressService AddressTransactionReader) *AddressService {
 	return &AddressService{
-		addressRPC:               addressRPC,
+		addressStateReader:       addressStateReader,
 		addressTransactionReader: txRepoToAddressService,
 	}
 }
@@ -45,17 +45,17 @@ func (s *AddressService) GetAddress(ctx context.Context, address string) (*types
 		return nil, types.ErrInvalidAddress
 	}
 
-	balance, err := s.addressRPC.GetBalance(ctx, address)
+	balance, err := s.addressStateReader.GetBalance(ctx, address)
 	if err != nil {
 		return nil, fmt.Errorf("get balance of address %s: %w", address, err)
 	}
 
-	nonce, err := s.addressRPC.GetNonce(ctx, address)
+	nonce, err := s.addressStateReader.GetNonce(ctx, address)
 	if err != nil {
 		return nil, fmt.Errorf("get nonce of address %s: %w", address, err)
 	}
 
-	code, err := s.addressRPC.GetCode(ctx, address)
+	code, err := s.addressStateReader.GetCode(ctx, address)
 	if err != nil {
 		return nil, fmt.Errorf("get code of address %s: %w", address, err)
 	}

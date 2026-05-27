@@ -15,54 +15,53 @@ import (
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 )
 
-type BlockRPC interface {
+type ChainBlockReader interface {
 	GetBlockByNumber(ctx context.Context, number uint64) (*ethtypes.Block, error)
 	GetChainID(ctx context.Context) (*big.Int, error)
 }
 
-type BlockRepository interface {
+type BlockSyncStore interface {
 	GetBlockByNumber(ctx context.Context, number uint64) (*models.Block, bool, error)
 	InsertBlockWithTransactions(ctx context.Context, block *models.Block, txs []*models.Transaction) error
 	MarkBlockReceiptsSynced(ctx context.Context, blockNumber uint64) error
 	MarkBlockReceiptsSyncFailed(ctx context.Context, blockNumber uint64, reason string) error
 }
 
-// TransactionReceiptSyncer is the interface used by TxService to sync block transaction receipts.
-type TransactionReceiptSyncer interface {
+type BlockReceiptSyncer interface {
 	SyncBlockTransactionReceipts(ctx context.Context, blockNumber uint64) error
 }
 
-type TransactionRepository interface {
+type TransactionConflictReader interface {
 	GetTransactionsByHashes(ctx context.Context, hashes []string) (map[string]*models.Transaction, error)
 }
 
 type BlockService struct {
-	blockRPC                 BlockRPC
-	blockRepo                BlockRepository
-	transactionRepository    TransactionRepository
-	transactionReceiptSyncer TransactionReceiptSyncer
+	chainBlockReader          ChainBlockReader
+	blockSyncStore            BlockSyncStore
+	blockReceiptSyncer        BlockReceiptSyncer
+	transactionConflictReader TransactionConflictReader
 
 	startBlock uint64
 }
 
 func NewBlockService(
-	blockRPC BlockRPC,
-	blockRepo BlockRepository,
-	transactionRepository TransactionRepository,
-	transactionReceiptSyncer TransactionReceiptSyncer,
+	chainBlockReader ChainBlockReader,
+	blockSyncStore BlockSyncStore,
+	blockReceiptSyncer BlockReceiptSyncer,
+	transactionConflictReader TransactionConflictReader,
 	startBlock uint64,
 ) *BlockService {
 	return &BlockService{
-		blockRPC:                 blockRPC,
-		blockRepo:                blockRepo,
-		transactionRepository:    transactionRepository,
-		transactionReceiptSyncer: transactionReceiptSyncer,
-		startBlock:               startBlock,
+		chainBlockReader:          chainBlockReader,
+		blockSyncStore:            blockSyncStore,
+		blockReceiptSyncer:        blockReceiptSyncer,
+		transactionConflictReader: transactionConflictReader,
+		startBlock:                startBlock,
 	}
 }
 
 func (s *BlockService) getRawBlockByNumber(ctx context.Context, number uint64) (*ethtypes.Block, error) {
-	rpcBlock, err := s.blockRPC.GetBlockByNumber(ctx, number)
+	rpcBlock, err := s.chainBlockReader.GetBlockByNumber(ctx, number)
 	if err != nil {
 		return nil, err
 	}
@@ -70,7 +69,7 @@ func (s *BlockService) getRawBlockByNumber(ctx context.Context, number uint64) (
 }
 
 func (s *BlockService) GetBlockByNumber(ctx context.Context, number uint64) (model.BlockQueryResult, error) {
-	dbBlock, found, err := s.blockRepo.GetBlockByNumber(ctx, number)
+	dbBlock, found, err := s.blockSyncStore.GetBlockByNumber(ctx, number)
 	if err != nil {
 		return model.BlockQueryResult{}, fmt.Errorf("get block %d from db: %w", number, err)
 	}
@@ -89,7 +88,7 @@ func (s *BlockService) GetBlockByNumber(ctx context.Context, number uint64) (mod
 }
 
 func (s *BlockService) validateBlockForSync(ctx context.Context, blockModel *models.Block) error {
-	existingBlock, found, err := s.blockRepo.GetBlockByNumber(ctx, blockModel.Number)
+	existingBlock, found, err := s.blockSyncStore.GetBlockByNumber(ctx, blockModel.Number)
 	if err != nil {
 		return fmt.Errorf("query block %d from db: %w", blockModel.Number, err)
 	}
@@ -107,7 +106,7 @@ func (s *BlockService) validateBlockForSync(ctx context.Context, blockModel *mod
 	}
 
 	if blockModel.Number > 0 {
-		parentBlock, found, err := s.blockRepo.GetBlockByNumber(ctx, blockModel.Number-1)
+		parentBlock, found, err := s.blockSyncStore.GetBlockByNumber(ctx, blockModel.Number-1)
 		if err != nil {
 			return fmt.Errorf("query parent block %d from db: %w", blockModel.Number-1, err)
 		}
@@ -142,8 +141,7 @@ func (s *BlockService) buildTransactionModelsFromBlock(ctx context.Context, bloc
 		return []*models.Transaction{}, nil
 	}
 
-	chainID, err := s.blockRPC.
-		GetChainID(ctx)
+	chainID, err := s.chainBlockReader.GetChainID(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("get chain id: %w", err)
 	}
@@ -175,7 +173,7 @@ func (s *BlockService) validateTransactionsForSync(
 		hashes = append(hashes, txModel.Hash)
 	}
 
-	existingTxs, err := s.transactionRepository.GetTransactionsByHashes(ctx, hashes)
+	existingTxs, err := s.transactionConflictReader.GetTransactionsByHashes(ctx, hashes)
 	if err != nil {
 		return fmt.Errorf("query existing transactions by hashes: %w", err)
 	}
@@ -235,7 +233,7 @@ func (s *BlockService) SyncBlockToDB(ctx context.Context, number uint64) error {
 		blockModel.SyncStatus = models.BlockSyncStatusTransactionsSynced
 	}
 
-	if err := s.blockRepo.InsertBlockWithTransactions(ctx, blockModel, txModels); err != nil {
+	if err := s.blockSyncStore.InsertBlockWithTransactions(ctx, blockModel, txModels); err != nil {
 		return fmt.Errorf("insert block %d into db: %w", number, err)
 	}
 
@@ -243,8 +241,8 @@ func (s *BlockService) SyncBlockToDB(ctx context.Context, number uint64) error {
 		return nil
 	}
 
-	if err := s.transactionReceiptSyncer.SyncBlockTransactionReceipts(ctx, number); err != nil {
-		if markErr := s.blockRepo.MarkBlockReceiptsSyncFailed(ctx, number, err.Error()); markErr != nil {
+	if err := s.blockReceiptSyncer.SyncBlockTransactionReceipts(ctx, number); err != nil {
+		if markErr := s.blockSyncStore.MarkBlockReceiptsSyncFailed(ctx, number, err.Error()); markErr != nil {
 			return fmt.Errorf(
 				"sync receipts for block %d failed: %w; additionally failed to mark receipts sync failed: %v",
 				number,
@@ -254,13 +252,13 @@ func (s *BlockService) SyncBlockToDB(ctx context.Context, number uint64) error {
 		}
 		return fmt.Errorf("sync receipts for block %d: %w", number, err)
 	}
-	if err := s.blockRepo.MarkBlockReceiptsSynced(ctx, number); err != nil {
+	if err := s.blockSyncStore.MarkBlockReceiptsSynced(ctx, number); err != nil {
 		return fmt.Errorf("mark block %d receipts synced: %w", number, err)
 	}
 	return nil
 }
 
-// SyncBlockRangetoDB handles manual block sync for debugging or recovery.
+// SyncBlockRangeToDB handles manual block sync for debugging or recovery.
 // Not used by automatic indexing logic.
 func (s *BlockService) SyncBlockRangeToDB(ctx context.Context, start, end uint64) (*types.BlockRangeSyncResult, error) {
 	if start > end {
