@@ -105,6 +105,9 @@ func (r *BlockRPC) GetBlockNumberByTag(ctx context.Context, tag string) (uint64,
 }
 
 func (r *BlockRPC) GetChainID(ctx context.Context) (*big.Int, error) {
+	ctx, cancel := r.withTimeout(ctx)
+	defer cancel()
+
 	chainID, err := r.client.ChainID(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("get chain id: %w", err)

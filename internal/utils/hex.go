@@ -26,7 +26,7 @@ func ValidateTxHash(hash string) error {
 
 func ValidateAddress(address string) error {
 	if !strings.HasPrefix(address, "0x") {
-		return types.ErrInvalidTxHash
+		return types.ErrInvalidAddress
 	}
 
 	if len(address) != 42 {

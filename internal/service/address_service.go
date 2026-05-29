@@ -30,10 +30,13 @@ type AddressService struct {
 	addressTransactionReader AddressTransactionReader
 }
 
-func NewAddressService(addressStateReader AddressStateReader, txRepoToAddressService AddressTransactionReader) *AddressService {
+func NewAddressService(
+	addressStateReader AddressStateReader,
+	addressTransactionReader AddressTransactionReader,
+) *AddressService {
 	return &AddressService{
 		addressStateReader:       addressStateReader,
-		addressTransactionReader: txRepoToAddressService,
+		addressTransactionReader: addressTransactionReader,
 	}
 }
 

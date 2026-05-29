@@ -154,7 +154,7 @@ func ToAddressTransactionDTO(
 		FromAddress: tx.FromAddress,
 		ToAddress:   tx.ToAddress,
 
-		Status: tx.ReceiptStatus,
+		Status:  tx.ReceiptStatus,
 		GasUsed: tx.ReceiptGasUsed,
 
 		Direction:           direction,
