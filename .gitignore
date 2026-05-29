@@ -3,3 +3,6 @@ configs/config.yaml
 **/.DS_Store
 .idea/
 .idea_backup/
+
+#local private notes
+docs-private/
