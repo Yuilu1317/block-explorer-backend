@@ -19,6 +19,7 @@ type ServerConfig struct {
 }
 
 type RpcConfig struct {
+	ChainID        int64  `yaml:"chain_id"`
 	RPCURL         string `yaml:"rpc_url"`
 	TimeoutSeconds int    `yaml:"timeout_seconds"`
 }
@@ -48,6 +49,10 @@ func Load(path string) (*Config, error) {
 
 	if cfg.Server.Port == "" {
 		cfg.Server.Port = "8080"
+	}
+
+	if cfg.Rpc.ChainID <= 0 {
+		return nil, fmt.Errorf("rpc.chain_id must be positive")
 	}
 	if cfg.Rpc.RPCURL == "" {
 		return nil, fmt.Errorf("rpc.rpc_url is required")

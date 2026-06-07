@@ -12,6 +12,7 @@ func NewRouter(
 	addressController *controller.AddressController,
 	debugController *controller.DebugController,
 	indexerController *controller.IndexerController,
+	walletController *controller.WalletController,
 ) *gin.Engine {
 	r := gin.Default()
 
@@ -21,17 +22,7 @@ func NewRouter(
 		})
 	})
 
-	debugGroup := r.Group("/debug")
-	{
-		debugGroup.GET("/db-stats", debugController.DBStats)
-	}
-
-	indexerGroup := r.Group("/indexer")
-	{
-		indexerGroup.GET("/status", indexerController.GetSyncStatus)
-		indexerGroup.POST("/run-once", indexerController.RunOnce)
-	}
-
+	// Public read APIs.
 	txGroup := r.Group("/tx")
 	{
 		txGroup.GET("/:hash", txController.GetTxDetailByHashFromRPC)
@@ -40,10 +31,7 @@ func NewRouter(
 	blockGroup := r.Group("/block")
 	{
 		blockGroup.GET("/:number", blockController.GetBlock)
-		blockGroup.POST("/sync/:number", blockController.SyncBlock)
 	}
-
-	r.POST("/blocks/sync", blockController.SyncBlockRange)
 
 	addressGroup := r.Group("/address")
 	{
@@ -54,6 +42,32 @@ func NewRouter(
 	{
 		indexedGroup.GET("/tx/:hash", txController.GetIndexedTransactionByHash)
 		indexedGroup.GET("/address/:address/transactions", addressController.GetIndexedTransactionsByAddress)
+	}
+
+	// Internal service/admin APIs.
+	internalGroup := r.Group("/internal")
+	{
+		walletGroup := internalGroup.Group("/wallet")
+		{
+			walletGroup.GET("/completed-blocks", walletController.ListCompletedBlocks)
+		}
+
+		debugGroup := internalGroup.Group("/debug")
+		{
+			debugGroup.GET("/db-stats", debugController.DBStats)
+		}
+
+		indexerGroup := internalGroup.Group("/indexer")
+		{
+			indexerGroup.GET("/status", indexerController.GetSyncStatus)
+			indexerGroup.POST("/run-once", indexerController.RunOnce)
+		}
+
+		blockSyncGroup := internalGroup.Group("/blocks")
+		{
+			blockSyncGroup.POST("/sync", blockController.SyncBlockRange)
+			blockSyncGroup.POST("/sync/:number", blockController.SyncBlock)
+		}
 	}
 
 	return r

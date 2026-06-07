@@ -67,12 +67,20 @@ func Run() error {
 		blockRPC, blockRepo, blockService, cfg.Indexer.SyncTarget, cfg.Indexer.StartBlock)
 	indexerController := controller.NewIndexerController(blockIndexer)
 
+	walletService := service.NewWalletInternalService(
+		cfg.Rpc.ChainID,
+		blockRepo,
+		txRepo,
+	)
+	walletController := controller.NewWalletController(walletService)
+
 	router := api.NewRouter(
 		txController,
 		blockController,
 		addressController,
 		debugController,
 		indexerController,
+		walletController,
 	)
 
 	rootCtx, cancel := context.WithCancel(context.Background())

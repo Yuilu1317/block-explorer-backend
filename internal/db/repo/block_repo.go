@@ -137,3 +137,38 @@ func (r *BlockRepository) MarkBlockReceiptsSyncFailed(ctx context.Context, block
 	}
 	return nil
 }
+
+func (r *BlockRepository) ListWalletCompletedBlockRows(
+	ctx context.Context,
+	fromBlock int64,
+	limit int,
+) ([]models.Block, error) {
+	if fromBlock < 0 {
+		return nil, fmt.Errorf("from_block must be non-negative")
+	}
+	if limit <= 0 {
+		return nil, fmt.Errorf("limit must be positive")
+	}
+
+	fromBlockNumber := uint64(fromBlock)
+	var blocks []models.Block
+
+	err := r.db.WithContext(ctx).
+		Model(&models.Block{}).
+		Where("number >= ?", fromBlockNumber).
+		Where("transactions_synced = ?", true).
+		Where("receipts_synced = ?", true).
+		Where("sync_status = ?", models.BlockSyncStatusCompleted).
+		Where("last_sync_error IS NULL").
+		Order("number ASC").
+		Limit(limit).
+		Find(&blocks).
+		Error
+	if err != nil {
+		if mapped := mapDBError(err); mapped != nil {
+			return nil, mapped
+		}
+		return nil, fmt.Errorf("list wallet completed block rows: %w", err)
+	}
+	return blocks, nil
+}

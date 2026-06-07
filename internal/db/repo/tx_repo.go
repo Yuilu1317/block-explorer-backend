@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -159,33 +158,26 @@ func (r *TransactionRepository) ListTransactionsMissingReceiptByBlockNumber(
 	return txs, nil
 }
 
-func (r *TransactionRepository) ListSuccessfulIncomingTransactionsInCompletedBlocks(
+func (r *TransactionRepository) ListWalletCompletedTransactionRows(
 	ctx context.Context,
-	address string,
-	fromBlock uint64,
-	toBlock uint64,
+	blockNumbers []uint64,
 ) ([]models.Transaction, error) {
+	if len(blockNumbers) == 0 {
+		return []models.Transaction{}, nil
+	}
 	var txs []models.Transaction
-
 	err := r.db.WithContext(ctx).
 		Model(&models.Transaction{}).
-		Joins("JOIN blocks ON blocks.number = transactions.block_number").
-		Where("transactions.to_address_lower = ?", strings.ToLower(address)).
-		Where("transactions.block_number BETWEEN ? AND ?", fromBlock, toBlock).
-		Where("transactions.receipt_status = ?", uint64(1)).
-		Where("blocks.transactions_synced = ?", true).
-		Where("blocks.receipts_synced = ?", true).
-		Where("blocks.sync_status = ?", models.BlockSyncStatusCompleted).
-		Order("transactions.block_number ASC").
-		Order("transactions.tx_index ASC").
+		Where("block_number IN ?", blockNumbers).
+		Order("block_number ASC").
+		Order("tx_index ASC").
 		Find(&txs).
 		Error
 	if err != nil {
 		if mapped := mapDBError(err); mapped != nil {
-			return nil, mapped
+			return nil, fmt.Errorf("list wallet completed transaction rows: %w", mapped)
 		}
-		return nil, fmt.Errorf("list successful incoming transactions in completed blocks: %w", err)
+		return nil, fmt.Errorf("list wallet completed transaction rows: %w", err)
 	}
-
 	return txs, nil
 }

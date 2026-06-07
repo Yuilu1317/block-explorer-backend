@@ -1268,206 +1268,118 @@ func TestTransactionRepository_ListTransactionsMissingReceiptByBlockNumber_DBErr
 	}
 }
 
-func TestTransactionRepository_ListSuccessfulIncomingTransactionsInCompletedBlocks_FiltersUnsafeTransactions(t *testing.T) {
-	r, db := setupTransactionRepoWithBlocks(t)
+func TestTransactionRepository_ListWalletCompletedTransactionRows_EmptyBlockNumbersReturnsEmptySlice(t *testing.T) {
+	r, _ := setupTransactionRepo(t)
 	ctx := context.Background()
 
-	targetAddress := "0x2222222222222222222222222222222222222222"
-	targetAddressLower := strings.ToLower(targetAddress)
-
-	otherAddress := "0x3333333333333333333333333333333333333333"
-	otherAddressLower := strings.ToLower(otherAddress)
-
-	statusOne := uint64(1)
-	statusZero := uint64(0)
-	gasUsed := uint64(21000)
-
-	blocks := []*models.Block{
-		newTestBlock(100, models.BlockSyncStatusCompleted, true, true),
-		newTestBlock(101, models.BlockSyncStatusCompleted, true, true),
-		newTestBlock(102, models.BlockSyncStatusCompleted, true, true),
-		newTestBlock(103, models.BlockSyncStatusReceiptsFailed, true, false),
-		newTestBlock(104, models.BlockSyncStatusCompleted, false, true),
-		newTestBlock(105, models.BlockSyncStatusCompleted, true, false),
-		newTestBlock(106, models.BlockSyncStatusCompleted, true, true),
-		newTestBlock(90, models.BlockSyncStatusCompleted, true, true),
-	}
-
-	for _, block := range blocks {
-		if err := db.Create(block).Error; err != nil {
-			t.Fatalf("seed block %d: %v", block.Number, err)
-		}
-	}
-
-	validTx := newTestTransaction("0xvalid", 100, 0)
-	validTx.ReceiptStatus = &statusOne
-	validTx.ReceiptGasUsed = &gasUsed
-
-	receiptNilTx := newTestTransaction("0xreceiptnil", 101, 0)
-	// ReceiptStatus nil, ReceiptGasUsed nil
-
-	receiptFailedTx := newTestTransaction("0xreceiptfailed", 102, 0)
-	receiptFailedTx.ReceiptStatus = &statusZero
-	receiptFailedTx.ReceiptGasUsed = &gasUsed
-
-	receiptsFailedBlockTx := newTestTransaction("0xblockreceiptsfailed", 103, 0)
-	receiptsFailedBlockTx.ReceiptStatus = &statusOne
-	receiptsFailedBlockTx.ReceiptGasUsed = &gasUsed
-
-	transactionsNotSyncedBlockTx := newTestTransaction("0xblocktransactionsnotsynced", 104, 0)
-	transactionsNotSyncedBlockTx.ReceiptStatus = &statusOne
-	transactionsNotSyncedBlockTx.ReceiptGasUsed = &gasUsed
-
-	receiptsNotSyncedBlockTx := newTestTransaction("0xblockreceiptsnotsynced", 105, 0)
-	receiptsNotSyncedBlockTx.ReceiptStatus = &statusOne
-	receiptsNotSyncedBlockTx.ReceiptGasUsed = &gasUsed
-
-	outgoingTx := newTestTransaction("0xoutgoing", 106, 0)
-	outgoingTx.FromAddress = targetAddress
-	outgoingTx.FromAddressLower = targetAddressLower
-	outgoingTx.ToAddress = otherAddress
-	outgoingTx.ToAddressLower = otherAddressLower
-	outgoingTx.ReceiptStatus = &statusOne
-	outgoingTx.ReceiptGasUsed = &gasUsed
-
-	outOfRangeTx := newTestTransaction("0xoutofrange", 90, 0)
-	outOfRangeTx.ReceiptStatus = &statusOne
-	outOfRangeTx.ReceiptGasUsed = &gasUsed
-
-	txs := []*models.Transaction{
-		validTx,
-		receiptNilTx,
-		receiptFailedTx,
-		receiptsFailedBlockTx,
-		transactionsNotSyncedBlockTx,
-		receiptsNotSyncedBlockTx,
-		outgoingTx,
-		outOfRangeTx,
-	}
-
-	for _, tx := range txs {
-		if err := db.Create(tx).Error; err != nil {
-			t.Fatalf("seed transaction %s: %v", tx.Hash, err)
-		}
-	}
-
-	got, err := r.ListSuccessfulIncomingTransactionsInCompletedBlocks(
-		ctx,
-		targetAddress,
-		100,
-		106,
-	)
+	txs, err := r.ListWalletCompletedTransactionRows(ctx, nil)
 	if err != nil {
-		t.Fatalf("list successful incoming transactions in completed blocks: %v", err)
+		t.Fatalf("expected nil error, got %v", err)
 	}
 
-	if len(got) != 1 {
-		t.Fatalf("expected 1 transaction, got %d", len(got))
+	if txs == nil {
+		t.Fatal("expected empty slice, got nil")
 	}
 
-	if got[0].Hash != "0xvalid" {
-		t.Fatalf("expected only 0xvalid to be returned, got %s", got[0].Hash)
+	if len(txs) != 0 {
+		t.Fatalf("expected 0 transactions, got %d", len(txs))
 	}
 
-	if got[0].ToAddressLower != targetAddressLower {
-		t.Fatalf("expected to_address_lower=%s, got %s", targetAddressLower, got[0].ToAddressLower)
+	txs, err = r.ListWalletCompletedTransactionRows(ctx, []uint64{})
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
 	}
 
-	if got[0].ReceiptStatus == nil {
-		t.Fatalf("expected receipt status, got nil")
+	if txs == nil {
+		t.Fatal("expected empty slice, got nil")
 	}
 
-	if *got[0].ReceiptStatus != uint64(1) {
-		t.Fatalf("expected receipt status=1, got %d", *got[0].ReceiptStatus)
+	if len(txs) != 0 {
+		t.Fatalf("expected 0 transactions, got %d", len(txs))
 	}
 }
 
-func TestTransactionRepository_ListSuccessfulIncomingTransactionsInCompletedBlocks_OrdersByBlockNumberAndTxIndexAsc(t *testing.T) {
-	r, db := setupTransactionRepoWithBlocks(t)
+func TestTransactionRepository_ListWalletCompletedTransactionRows_ReturnsTransactionsByBlockNumbers(t *testing.T) {
+	r, db := setupTransactionRepo(t)
 	ctx := context.Background()
 
-	address := "0x2222222222222222222222222222222222222222"
-
+	statusZero := uint64(0)
 	statusOne := uint64(1)
-	gasUsed := uint64(21000)
 
-	blocks := []*models.Block{
-		newTestBlock(100, models.BlockSyncStatusCompleted, true, true),
-		newTestBlock(101, models.BlockSyncStatusCompleted, true, true),
-	}
+	tx101Index2 := newTestTransaction("0xwallet-tx-101-2", 101, 2)
+	tx101Index2.ReceiptStatus = &statusOne
 
-	for _, block := range blocks {
-		if err := db.Create(block).Error; err != nil {
-			t.Fatalf("seed block %d: %v", block.Number, err)
-		}
-	}
+	tx100Index2 := newTestTransaction("0xwallet-tx-100-2", 100, 2)
+	tx100Index2.ReceiptStatus = &statusZero
 
-	txs := []*models.Transaction{
-		newTestTransaction("0xtxblock101index1", 101, 1),
-		newTestTransaction("0xtxblock100index2", 100, 2),
-		newTestTransaction("0xtxblock100index0", 100, 0),
-	}
+	tx100Index1 := newTestTransaction("0xwallet-tx-100-1", 100, 1)
+	tx100Index1.ReceiptStatus = &statusOne
 
-	for _, tx := range txs {
-		tx.ReceiptStatus = &statusOne
-		tx.ReceiptGasUsed = &gasUsed
+	tx102Index1 := newTestTransaction("0xwallet-tx-102-1", 102, 1)
+	tx102Index1.ReceiptStatus = &statusOne
 
+	for _, tx := range []*models.Transaction{
+		tx101Index2,
+		tx100Index2,
+		tx100Index1,
+		tx102Index1,
+	} {
 		if err := db.Create(tx).Error; err != nil {
 			t.Fatalf("seed transaction %s: %v", tx.Hash, err)
 		}
 	}
 
-	got, err := r.ListSuccessfulIncomingTransactionsInCompletedBlocks(
-		ctx,
-		address,
-		100,
-		101,
-	)
+	txs, err := r.ListWalletCompletedTransactionRows(ctx, []uint64{100, 101})
 	if err != nil {
-		t.Fatalf("list successful incoming transactions in completed blocks: %v", err)
+		t.Fatalf("list wallet completed transaction rows: %v", err)
 	}
 
-	if len(got) != 3 {
-		t.Fatalf("expected 3 transactions, got %d", len(got))
+	if len(txs) != 3 {
+		t.Fatalf("expected 3 transactions, got %d", len(txs))
 	}
 
 	expectedHashes := []string{
-		"0xtxblock100index0",
-		"0xtxblock100index2",
-		"0xtxblock101index1",
+		"0xwallet-tx-100-1",
+		"0xwallet-tx-100-2",
+		"0xwallet-tx-101-2",
 	}
 
 	for i, expectedHash := range expectedHashes {
-		if got[i].Hash != expectedHash {
-			t.Fatalf("expected got[%d].Hash=%s, got %s", i, expectedHash, got[i].Hash)
+		if txs[i].Hash != expectedHash {
+			t.Fatalf("expected txs[%d].Hash=%s, got %s", i, expectedHash, txs[i].Hash)
+		}
+	}
+
+	if txs[1].ReceiptStatus == nil {
+		t.Fatal("expected receipt_status=0 transaction to be returned, got nil receipt status")
+	}
+
+	if *txs[1].ReceiptStatus != 0 {
+		t.Fatalf("expected receipt_status=0 to be returned, got %d", *txs[1].ReceiptStatus)
+	}
+
+	for _, tx := range txs {
+		if tx.BlockNumber == 102 {
+			t.Fatalf("expected block 102 transaction not to be returned, got %s", tx.Hash)
 		}
 	}
 }
 
-func TestTransactionRepository_ListSuccessfulIncomingTransactionsInCompletedBlocks_DBError(t *testing.T) {
-	r, db := setupTransactionRepoWithBlocks(t)
+func TestTransactionRepository_ListWalletCompletedTransactionRows_ReturnsEmptyWhenNoBlockMatches(t *testing.T) {
+	r, db := setupTransactionRepo(t)
 	ctx := context.Background()
 
-	sqlDB, err := db.DB()
+	tx := newTestTransaction("0xwallet-tx-100", 100, 0)
+	if err := db.Create(tx).Error; err != nil {
+		t.Fatalf("seed transaction: %v", err)
+	}
+
+	txs, err := r.ListWalletCompletedTransactionRows(ctx, []uint64{999})
 	if err != nil {
-		t.Fatalf("get sql db: %v", err)
+		t.Fatalf("list wallet completed transaction rows: %v", err)
 	}
 
-	if err := sqlDB.Close(); err != nil {
-		t.Fatalf("close db: %v", err)
-	}
-
-	got, err := r.ListSuccessfulIncomingTransactionsInCompletedBlocks(
-		ctx,
-		"0x2222222222222222222222222222222222222222",
-		100,
-		200,
-	)
-	if err == nil {
-		t.Fatalf("expected error, got nil")
-	}
-
-	if got != nil {
-		t.Fatalf("expected nil transactions, got %+v", got)
+	if len(txs) != 0 {
+		t.Fatalf("expected 0 transactions, got %d", len(txs))
 	}
 }

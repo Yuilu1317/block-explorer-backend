@@ -5,6 +5,8 @@ import (
 	"block-explorer-backend/internal/types"
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 
 	"gorm.io/gorm"
@@ -579,5 +581,152 @@ func TestBlockRepository_MarkBlockReceiptsSyncFailed_DBError(t *testing.T) {
 	err = r.MarkBlockReceiptsSyncFailed(ctx, 100, "receipt sync failed")
 	if err == nil {
 		t.Fatalf("expected error, got nil")
+	}
+}
+
+func TestBlockRepository_ListWalletCompletedBlockRows_ReturnsOnlyCompletedBlocks(t *testing.T) {
+	db := SetupTestDB(t)
+	r := NewBlockRepository(db)
+	ctx := context.Background()
+
+	if err := db.Create(newWalletCompletedRowsTestBlock(99, true, true, models.BlockSyncStatusCompleted, nil)).Error; err != nil {
+		t.Fatalf("seed block 99: %v", err)
+	}
+
+	if err := db.Create(newWalletCompletedRowsTestBlock(100, true, true, models.BlockSyncStatusCompleted, nil)).Error; err != nil {
+		t.Fatalf("seed block 100: %v", err)
+	}
+
+	if err := db.Create(newWalletCompletedRowsTestBlock(101, false, true, models.BlockSyncStatusCompleted, nil)).Error; err != nil {
+		t.Fatalf("seed block 101: %v", err)
+	}
+
+	if err := db.Create(newWalletCompletedRowsTestBlock(102, true, false, models.BlockSyncStatusCompleted, nil)).Error; err != nil {
+		t.Fatalf("seed block 102: %v", err)
+	}
+
+	if err := db.Create(newWalletCompletedRowsTestBlock(103, true, true, models.BlockSyncStatusPending, nil)).Error; err != nil {
+		t.Fatalf("seed block 103: %v", err)
+	}
+
+	syncErr := "receipt sync failed"
+	if err := db.Create(newWalletCompletedRowsTestBlock(104, true, true, models.BlockSyncStatusCompleted, &syncErr)).Error; err != nil {
+		t.Fatalf("seed block 104: %v", err)
+	}
+
+	if err := db.Create(newWalletCompletedRowsTestBlock(105, true, true, models.BlockSyncStatusCompleted, nil)).Error; err != nil {
+		t.Fatalf("seed block 105: %v", err)
+	}
+
+	blocks, err := r.ListWalletCompletedBlockRows(ctx, 100, 10)
+	if err != nil {
+		t.Fatalf("list wallet completed block rows: %v", err)
+	}
+
+	if len(blocks) != 2 {
+		t.Fatalf("expected 2 completed blocks, got %d", len(blocks))
+	}
+
+	if blocks[0].Number != 100 {
+		t.Fatalf("expected first block 100, got %d", blocks[0].Number)
+	}
+
+	if blocks[1].Number != 105 {
+		t.Fatalf("expected second block 105, got %d", blocks[1].Number)
+	}
+}
+
+func TestBlockRepository_ListWalletCompletedBlockRows_AppliesLimitToCompletedBlocks(t *testing.T) {
+	db := SetupTestDB(t)
+	r := NewBlockRepository(db)
+	ctx := context.Background()
+
+	for _, number := range []uint64{100, 101, 102} {
+		if err := db.Create(newWalletCompletedRowsTestBlock(number, true, true, models.BlockSyncStatusCompleted, nil)).Error; err != nil {
+			t.Fatalf("seed block %d: %v", number, err)
+		}
+	}
+
+	blocks, err := r.ListWalletCompletedBlockRows(ctx, 100, 2)
+	if err != nil {
+		t.Fatalf("list wallet completed block rows: %v", err)
+	}
+
+	if len(blocks) != 2 {
+		t.Fatalf("expected 2 blocks, got %d", len(blocks))
+	}
+
+	if blocks[0].Number != 100 {
+		t.Fatalf("expected first block 100, got %d", blocks[0].Number)
+	}
+
+	if blocks[1].Number != 101 {
+		t.Fatalf("expected second block 101, got %d", blocks[1].Number)
+	}
+}
+
+func TestBlockRepository_ListWalletCompletedBlockRows_ReturnsEmptyWhenNoMatch(t *testing.T) {
+	db := SetupTestDB(t)
+	r := NewBlockRepository(db)
+	ctx := context.Background()
+
+	if err := db.Create(newWalletCompletedRowsTestBlock(100, true, false, models.BlockSyncStatusCompleted, nil)).Error; err != nil {
+		t.Fatalf("seed block: %v", err)
+	}
+
+	blocks, err := r.ListWalletCompletedBlockRows(ctx, 100, 10)
+	if err != nil {
+		t.Fatalf("list wallet completed block rows: %v", err)
+	}
+
+	if len(blocks) != 0 {
+		t.Fatalf("expected 0 blocks, got %d", len(blocks))
+	}
+}
+
+func TestBlockRepository_ListWalletCompletedBlockRows_InvalidArgsReturnError(t *testing.T) {
+	db := SetupTestDB(t)
+	r := NewBlockRepository(db)
+	ctx := context.Background()
+
+	_, err := r.ListWalletCompletedBlockRows(ctx, -1, 10)
+	if err == nil {
+		t.Fatal("expected error for negative fromBlock, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "from_block must be non-negative") {
+		t.Fatalf("expected from_block error, got %q", err.Error())
+	}
+
+	_, err = r.ListWalletCompletedBlockRows(ctx, 100, 0)
+	if err == nil {
+		t.Fatal("expected error for non-positive limit, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "limit must be positive") {
+		t.Fatalf("expected limit error, got %q", err.Error())
+	}
+}
+
+func newWalletCompletedRowsTestBlock(
+	number uint64,
+	transactionsSynced bool,
+	receiptsSynced bool,
+	syncStatus string,
+	lastSyncError *string,
+) *models.Block {
+	return &models.Block{
+		Number:             number,
+		Hash:               fmt.Sprintf("0xwalletblockhash%d", number),
+		ParentHash:         fmt.Sprintf("0xwalletparenthash%d", number),
+		Timestamp:          1700000000 + number,
+		Miner:              "0x1111111111111111111111111111111111111111",
+		TxCount:            1,
+		GasUsed:            21000,
+		GasLimit:           30000000,
+		TransactionsSynced: transactionsSynced,
+		ReceiptsSynced:     receiptsSynced,
+		SyncStatus:         syncStatus,
+		LastSyncError:      lastSyncError,
 	}
 }
