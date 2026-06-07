@@ -3,7 +3,7 @@ server:
 
 rpc:
   chain_id: 11155111
-  rpc_url: "https://ethereum-rpc.publicnode.com"
+  rpc_url: "https://ethereum-sepolia-rpc.publicnode.com"
   timeout_seconds: 10
 
 db:
@@ -14,4 +14,4 @@ indexer:
   interval_seconds: 2
   run_timeout_seconds: 3
   sync_target: safe
-  start_block: 46147
+  start_block: 11008017
