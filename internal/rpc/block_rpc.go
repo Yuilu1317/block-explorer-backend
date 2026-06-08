@@ -11,17 +11,15 @@ import (
 
 	"github.com/ethereum/go-ethereum"
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/ethclient"
-	"github.com/ethereum/go-ethereum/rpc"
 )
 
 type BlockRPC struct {
 	*BaseRPC
 }
 
-func NewBlockRPC(client *ethclient.Client, rpcClient *rpc.Client, timeoutSeconds int) *BlockRPC {
+func NewBlockRPC(baseRPC *BaseRPC) *BlockRPC {
 	return &BlockRPC{
-		BaseRPC: NewBaseRPC(client, rpcClient, timeoutSeconds),
+		BaseRPC: baseRPC,
 	}
 }
 

@@ -45,19 +45,25 @@ func Run() error {
 		return fmt.Errorf("new eth client: %w", err)
 	}
 
-	txRPC := rpc.NewTxRPC(ethClient, rpcClient, cfg.Rpc.TimeoutSeconds)
+	baseRPC := rpc.NewBaseRPC(
+		ethClient,
+		rpcClient,
+		time.Duration(cfg.Rpc.TimeoutSeconds)*time.Second,
+	)
+
+	txRPC := rpc.NewTxRPC(baseRPC)
 	txRepo := repo.NewTransactionRepository(database)
 	txService := service.NewTxService(txRPC, txRepo, txRepo)
 	txController := controller.NewTxController(txService)
 
-	blockRPC := rpc.NewBlockRPC(ethClient, rpcClient, cfg.Rpc.TimeoutSeconds)
+	blockRPC := rpc.NewBlockRPC(baseRPC)
 	blockRepo := repo.NewBlockRepository(database)
 	// txService implements TransactionReceiptSyncer.
 	// BlockService uses it to sync transaction receipts after block + transactions are inserted.
 	blockService := service.NewBlockService(blockRPC, blockRepo, txService, txRepo, cfg.Indexer.StartBlock)
 	blockController := controller.NewBlockController(blockService, blockService)
 
-	addressRPC := rpc.NewAddressRPC(ethClient, rpcClient, cfg.Rpc.TimeoutSeconds)
+	addressRPC := rpc.NewAddressRPC(baseRPC)
 	addressService := service.NewAddressService(addressRPC, txRepo)
 	addressController := controller.NewAddressController(addressService)
 

@@ -9,19 +9,19 @@ import (
 )
 
 type BaseRPC struct {
-	client         *ethclient.Client
-	rpcClient      *rpc.Client
-	timeoutSeconds int
+	client    *ethclient.Client
+	rpcClient *rpc.Client
+	timeout   time.Duration
 }
 
-func NewBaseRPC(client *ethclient.Client, rpcClient *rpc.Client, timeoutSeconds int) *BaseRPC {
+func NewBaseRPC(client *ethclient.Client, rpcClient *rpc.Client, timeout time.Duration) *BaseRPC {
 	return &BaseRPC{
-		client:         client,
-		rpcClient:      rpcClient,
-		timeoutSeconds: timeoutSeconds,
+		client:    client,
+		rpcClient: rpcClient,
+		timeout:   timeout,
 	}
 }
 
 func (r *BaseRPC) withTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(ctx, time.Duration(r.timeoutSeconds)*time.Second)
+	return context.WithTimeout(ctx, r.timeout)
 }

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 type jsonRPCRequest struct {
@@ -29,7 +30,15 @@ func newTestBlockRPC(t *testing.T, url string) *BlockRPC {
 
 	t.Cleanup(rpcClient.Close)
 
-	return NewBlockRPC(ethClient, rpcClient, 5)
+	TimeoutSeconds := 5
+
+	baseRPC := NewBaseRPC(
+		ethClient,
+		rpcClient,
+		time.Duration(TimeoutSeconds)*time.Second,
+	)
+
+	return NewBlockRPC(baseRPC)
 }
 
 func decodeJSONRPCRequest(t *testing.T, r *http.Request, expectedMethod string) jsonRPCRequest {

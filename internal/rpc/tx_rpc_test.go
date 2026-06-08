@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	gethtypes "github.com/ethereum/go-ethereum/core/types"
@@ -32,7 +33,15 @@ func newTestTxRPC(t *testing.T, url string) *TxRPC {
 	}
 	t.Cleanup(rpcClient.Close)
 
-	return NewTxRPC(ethClient, rpcClient, 5)
+	TimeoutSeconds := 5
+
+	baseRPC := NewBaseRPC(
+		ethClient,
+		rpcClient,
+		time.Duration(TimeoutSeconds)*time.Second,
+	)
+
+	return NewTxRPC(baseRPC)
 }
 
 func decodeJSONTxRPCRequest(t *testing.T, r *http.Request, expectedMethod string) jsonTxRPCRequest {
