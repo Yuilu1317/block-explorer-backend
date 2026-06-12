@@ -55,11 +55,11 @@ func TestWalletController_ListCompletedBlocks_Success(t *testing.T) {
 	}
 
 	if !service.listCompletedBlocksCalled {
-		t.Fatal("expected service to be called")
+		t.Fatal("expected ListCompletedBlocks to be called")
 	}
 
-	if service.gotListChainID != 11155111 {
-		t.Fatalf("expected chain id 11155111, got %d", service.gotListChainID)
+	if service.gotListCompletedBlocksChainID != 11155111 {
+		t.Fatalf("expected chain id 11155111, got %d", service.gotListCompletedBlocksChainID)
 	}
 
 	if service.gotFromBlock != 100 {
@@ -68,6 +68,10 @@ func TestWalletController_ListCompletedBlocks_Success(t *testing.T) {
 
 	if service.gotLimit != 10 {
 		t.Fatalf("expected limit 10, got %d", service.gotLimit)
+	}
+
+	if service.getSyncStatusCalled {
+		t.Fatal("expected GetSyncStatus not to be called")
 	}
 
 	var resp types.WalletCompletedBlocksResponse
@@ -155,8 +159,6 @@ func TestWalletController_ListCompletedBlocks_BadRequest(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
-
 		t.Run(tt.name, func(t *testing.T) {
 			gin.SetMode(gin.TestMode)
 
@@ -179,7 +181,11 @@ func TestWalletController_ListCompletedBlocks_BadRequest(t *testing.T) {
 			}
 
 			if service.listCompletedBlocksCalled {
-				t.Fatal("expected service not to be called")
+				t.Fatal("expected ListCompletedBlocks not to be called")
+			}
+
+			if service.getSyncStatusCalled {
+				t.Fatal("expected GetSyncStatus not to be called")
 			}
 
 			if !strings.Contains(w.Body.String(), tt.wantErr) {
@@ -209,15 +215,226 @@ func TestWalletController_ListCompletedBlocks_ServiceError(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	if !service.listCompletedBlocksCalled {
-		t.Fatal("expected service to be called")
+		t.Fatal("expected ListCompletedBlocks to be called")
 	}
 
-	if w.Code < 400 {
-		t.Fatalf("expected error status, got %d, body=%s", w.Code, w.Body.String())
+	if service.getSyncStatusCalled {
+		t.Fatal("expected GetSyncStatus not to be called")
+	}
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected status 500, got %d, body=%s", w.Code, w.Body.String())
 	}
 
 	if !strings.Contains(w.Body.String(), "internal server error") {
-		t.Fatalf("expected body to contain service error, got %q", w.Body.String())
+		t.Fatalf("expected body to contain internal server error, got %q", w.Body.String())
+	}
+}
+
+func TestWalletController_GetSyncStatus_Success(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	service := &fakeWalletService{
+		syncStatusResp: &types.GetSyncStatusResponse{
+			ChainID:    11155111,
+			SyncTarget: "safe",
+			LatestCompletedBlock: &types.CompletedBlockSummary{
+				Number: 123,
+				Hash:   "0xblock123",
+			},
+		},
+	}
+
+	router := newWalletControllerTestRouter(NewWalletController(service))
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/internal/wallet/sync-status?chain_id=11155111",
+		nil,
+	)
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d, body=%s", w.Code, w.Body.String())
+	}
+
+	if !service.getSyncStatusCalled {
+		t.Fatal("expected GetSyncStatus to be called")
+	}
+
+	if service.gotGetSyncStatusChainID != 11155111 {
+		t.Fatalf("expected chain id 11155111, got %d", service.gotGetSyncStatusChainID)
+	}
+
+	if service.listCompletedBlocksCalled {
+		t.Fatal("expected ListCompletedBlocks not to be called")
+	}
+
+	var resp types.GetSyncStatusResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+
+	if resp.ChainID != 11155111 {
+		t.Fatalf("expected response chain id 11155111, got %d", resp.ChainID)
+	}
+
+	if resp.SyncTarget != "safe" {
+		t.Fatalf("expected sync target safe, got %q", resp.SyncTarget)
+	}
+
+	if resp.LatestCompletedBlock == nil {
+		t.Fatal("expected latest_completed_block, got nil")
+	}
+
+	if resp.LatestCompletedBlock.Number != 123 {
+		t.Fatalf("expected latest completed block number 123, got %d", resp.LatestCompletedBlock.Number)
+	}
+
+	if resp.LatestCompletedBlock.Hash != "0xblock123" {
+		t.Fatalf("expected latest completed block hash 0xblock123, got %q", resp.LatestCompletedBlock.Hash)
+	}
+}
+
+func TestWalletController_GetSyncStatus_BadRequest(t *testing.T) {
+	tests := []struct {
+		name    string
+		path    string
+		wantErr string
+	}{
+		{
+			name:    "missing chain id",
+			path:    "/internal/wallet/sync-status",
+			wantErr: "chain_id is required",
+		},
+		{
+			name:    "invalid chain id",
+			path:    "/internal/wallet/sync-status?chain_id=abc",
+			wantErr: "chain_id must be a valid int64",
+		},
+		{
+			name:    "zero chain id",
+			path:    "/internal/wallet/sync-status?chain_id=0",
+			wantErr: "chain_id must be positive",
+		},
+		{
+			name:    "negative chain id",
+			path:    "/internal/wallet/sync-status?chain_id=-1",
+			wantErr: "chain_id must be positive",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+
+			service := &fakeWalletService{
+				syncStatusResp: &types.GetSyncStatusResponse{
+					ChainID:    11155111,
+					SyncTarget: "safe",
+					LatestCompletedBlock: &types.CompletedBlockSummary{
+						Number: 123,
+						Hash:   "0xblock123",
+					},
+				},
+			}
+
+			router := newWalletControllerTestRouter(NewWalletController(service))
+
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, tt.path, nil)
+
+			router.ServeHTTP(w, req)
+
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("expected status 400, got %d, body=%s", w.Code, w.Body.String())
+			}
+
+			if service.getSyncStatusCalled {
+				t.Fatal("expected GetSyncStatus not to be called")
+			}
+
+			if service.listCompletedBlocksCalled {
+				t.Fatal("expected ListCompletedBlocks not to be called")
+			}
+
+			if !strings.Contains(w.Body.String(), tt.wantErr) {
+				t.Fatalf("expected body to contain %q, got %q", tt.wantErr, w.Body.String())
+			}
+		})
+	}
+}
+
+func TestWalletController_GetSyncStatus_NotFound(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	service := &fakeWalletService{
+		syncStatusErr: types.ErrLatestCompletedBlockNotFound,
+	}
+
+	router := newWalletControllerTestRouter(NewWalletController(service))
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/internal/wallet/sync-status?chain_id=11155111",
+		nil,
+	)
+
+	router.ServeHTTP(w, req)
+
+	if !service.getSyncStatusCalled {
+		t.Fatal("expected GetSyncStatus to be called")
+	}
+
+	if service.gotGetSyncStatusChainID != 11155111 {
+		t.Fatalf("expected chain id 11155111, got %d", service.gotGetSyncStatusChainID)
+	}
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected status 404, got %d, body=%s", w.Code, w.Body.String())
+	}
+
+	if !strings.Contains(w.Body.String(), "latest completed block not found") {
+		t.Fatalf("expected body to contain latest completed block not found, got %q", w.Body.String())
+	}
+}
+
+func TestWalletController_GetSyncStatus_ServiceError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	serviceErr := errors.New("service failed")
+	service := &fakeWalletService{
+		syncStatusErr: serviceErr,
+	}
+
+	router := newWalletControllerTestRouter(NewWalletController(service))
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/internal/wallet/sync-status?chain_id=11155111",
+		nil,
+	)
+
+	router.ServeHTTP(w, req)
+
+	if !service.getSyncStatusCalled {
+		t.Fatal("expected GetSyncStatus to be called")
+	}
+
+	if service.gotGetSyncStatusChainID != 11155111 {
+		t.Fatalf("expected chain id 11155111, got %d", service.gotGetSyncStatusChainID)
+	}
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected status 500, got %d, body=%s", w.Code, w.Body.String())
+	}
+
+	if !strings.Contains(w.Body.String(), "internal server error") {
+		t.Fatalf("expected body to contain internal server error, got %q", w.Body.String())
 	}
 }
 
@@ -229,6 +446,7 @@ func newWalletControllerTestRouter(controller *WalletController) *gin.Engine {
 		walletGroup := internalGroup.Group("/wallet")
 		{
 			walletGroup.GET("/completed-blocks", controller.ListCompletedBlocks)
+			walletGroup.GET("/sync-status", controller.GetSyncStatus)
 		}
 	}
 
@@ -242,13 +460,13 @@ type fakeWalletService struct {
 	syncStatusResp *types.GetSyncStatusResponse
 	syncStatusErr  error
 
-	listCompletedBlocksCalled bool
-	gotListChainID            int64
-	gotFromBlock              int64
-	gotLimit                  int
+	listCompletedBlocksCalled     bool
+	gotListCompletedBlocksChainID int64
+	gotFromBlock                  int64
+	gotLimit                      int
 
-	getSyncStatusCalled  bool
-	gotSyncStatusChainID int64
+	getSyncStatusCalled     bool
+	gotGetSyncStatusChainID int64
 }
 
 func (f *fakeWalletService) ListCompletedBlocks(
@@ -258,7 +476,7 @@ func (f *fakeWalletService) ListCompletedBlocks(
 	limit int,
 ) (*types.WalletCompletedBlocksResponse, error) {
 	f.listCompletedBlocksCalled = true
-	f.gotListChainID = chainID
+	f.gotListCompletedBlocksChainID = chainID
 	f.gotFromBlock = fromBlock
 	f.gotLimit = limit
 
@@ -274,7 +492,7 @@ func (f *fakeWalletService) GetSyncStatus(
 	chainID int64,
 ) (*types.GetSyncStatusResponse, error) {
 	f.getSyncStatusCalled = true
-	f.gotSyncStatusChainID = chainID
+	f.gotGetSyncStatusChainID = chainID
 
 	if f.syncStatusErr != nil {
 		return nil, f.syncStatusErr

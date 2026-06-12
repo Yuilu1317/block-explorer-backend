@@ -39,7 +39,9 @@ func (r *BlockRepository) GetLatestFullySyncedBlockNumber(ctx context.Context, c
 	err := r.db.WithContext(ctx).
 		Model(&models.Block{}).
 		Where("chain_id = ?", chainID).
+		Where("sync_status = ?", models.BlockSyncStatusCompleted).
 		Where("transactions_synced = ? AND receipts_synced = ?", true, true).
+		Where("last_sync_error IS NULL").
 		Select("MAX(number)").
 		Scan(&latestFullyNumber).
 		Error
