@@ -1,6 +1,7 @@
 package types
 
 type TxDetailDTO struct {
+	ChainID     int64   `json:"chain_id"`
 	Hash        string  `json:"hash"`
 	FromAddress string  `json:"from_address"`
 	ToAddress   string  `json:"to_address"`
@@ -16,6 +17,7 @@ type TxDetailDTO struct {
 }
 
 type IndexedTransactionDTO struct {
+	ChainID     int64  `json:"chain_id"`
 	Hash        string `json:"hash"`
 	BlockNumber uint64 `json:"block_number"`
 	BlockHash   string `json:"block_hash"`

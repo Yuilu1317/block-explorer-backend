@@ -45,6 +45,27 @@ func Run() error {
 		return fmt.Errorf("new eth client: %w", err)
 	}
 
+	chainCheckCtx, chainCheckCancel := context.WithTimeout(
+		context.Background(),
+		time.Duration(cfg.Rpc.TimeoutSeconds)*time.Second,
+	)
+	defer chainCheckCancel()
+
+	actualChainID, err := ethClient.ChainID(chainCheckCtx)
+	if err != nil {
+		return fmt.Errorf("get rpc chain id: %w", err)
+	}
+
+	if actualChainID.Int64() != cfg.Rpc.ChainID {
+		return fmt.Errorf(
+			"rpc chain_id mismatch: configured=%d actual=%d",
+			cfg.Rpc.ChainID,
+			actualChainID.Int64(),
+		)
+	}
+
+	log.Printf("rpc chain_id verified: %d", cfg.Rpc.ChainID)
+
 	baseRPC := rpc.NewBaseRPC(
 		ethClient,
 		rpcClient,
@@ -53,30 +74,54 @@ func Run() error {
 
 	txRPC := rpc.NewTxRPC(baseRPC)
 	txRepo := repo.NewTransactionRepository(database)
-	txService := service.NewTxService(txRPC, txRepo, txRepo)
+	txService := service.NewTxService(
+		cfg.Rpc.ChainID,
+		txRPC,
+		txRepo,
+		txRepo,
+	)
 	txController := controller.NewTxController(txService)
 
 	blockRPC := rpc.NewBlockRPC(baseRPC)
 	blockRepo := repo.NewBlockRepository(database)
 	// txService implements TransactionReceiptSyncer.
 	// BlockService uses it to sync transaction receipts after block + transactions are inserted.
-	blockService := service.NewBlockService(blockRPC, blockRepo, txService, txRepo, cfg.Indexer.StartBlock)
+	blockService := service.NewBlockService(
+		cfg.Rpc.ChainID,
+		blockRPC,
+		blockRepo,
+		txService,
+		txRepo,
+		cfg.Indexer.StartBlock,
+	)
 	blockController := controller.NewBlockController(blockService, blockService)
 
 	addressRPC := rpc.NewAddressRPC(baseRPC)
-	addressService := service.NewAddressService(addressRPC, txRepo)
+	addressService := service.NewAddressService(
+		cfg.Rpc.ChainID,
+		addressRPC,
+		txRepo,
+	)
 	addressController := controller.NewAddressController(addressService)
 
 	debugController := controller.NewDebugController(sqlDB)
 
 	blockIndexer := indexer.NewBlockIndexer(
-		blockRPC, blockRepo, blockService, cfg.Indexer.SyncTarget, cfg.Indexer.StartBlock)
+		cfg.Rpc.ChainID,
+		blockRPC,
+		blockRepo,
+		blockService,
+		cfg.Indexer.SyncTarget,
+		cfg.Indexer.StartBlock,
+	)
 	indexerController := controller.NewIndexerController(blockIndexer)
 
 	walletService := service.NewWalletInternalService(
 		cfg.Rpc.ChainID,
+		cfg.Indexer.SyncTarget,
 		blockRepo,
 		txRepo,
+		blockRepo,
 	)
 	walletController := controller.NewWalletController(walletService)
 

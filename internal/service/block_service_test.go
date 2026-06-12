@@ -2,85 +2,95 @@ package service
 
 import (
 	"block-explorer-backend/internal/db/models"
-	"block-explorer-backend/internal/types"
+	servicemodel "block-explorer-backend/internal/service/model"
 	"context"
-	"errors"
 	"math/big"
 	"strings"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/crypto"
+)
+
+const (
+	blockServiceTestChainID int64  = 11155111
+	blockServiceStartBlock  uint64 = 100
 )
 
 type fakeChainBlockReader struct {
-	block *ethtypes.Block
-	err   error
-
 	blocks map[uint64]*ethtypes.Block
-	errs   map[uint64]error
+	err    error
 
-	onGetBlock func(number uint64)
-
-	chainID          *big.Int
-	chainIDErr       error
-	getChainIDCalled bool
+	called    bool
+	gotNumber uint64
 }
 
 func (f *fakeChainBlockReader) GetBlockByNumber(ctx context.Context, number uint64) (*ethtypes.Block, error) {
-	if f.onGetBlock != nil {
-		f.onGetBlock(number)
+	f.called = true
+	f.gotNumber = number
+
+	if f.err != nil {
+		return nil, f.err
 	}
 
-	if f.errs != nil {
-		if err, ok := f.errs[number]; ok {
-			return nil, err
-		}
-	}
 	if f.blocks != nil {
 		if block, ok := f.blocks[number]; ok {
 			return block, nil
 		}
 	}
-	if f.err != nil {
-		return nil, f.err
-	}
-	return f.block, nil
+
+	return nil, nil
 }
 
-func (f *fakeChainBlockReader) GetChainID(ctx context.Context) (*big.Int, error) {
-	f.getChainIDCalled = true
-	if f.chainIDErr != nil {
-		return nil, f.chainIDErr
-	}
-	if f.chainID != nil {
-		return f.chainID, nil
-	}
-	return big.NewInt(1), nil
+type fakeGetBlockCall struct {
+	chainID int64
+	number  uint64
 }
 
 type fakeBlockSyncStore struct {
-	block *models.Block
-	found bool
-	err   error
-
 	blocks map[uint64]*models.Block
+	getErr error
 
-	insertBlockWithTransactionsCalled bool
-	insertBlockArg                    *models.Block
-	insertTxsArg                      []*models.Transaction
-	insertBlockWithTransactionsErr    error
-	insertedBlocks                    map[uint64]*models.Block
+	getCalls []fakeGetBlockCall
 
-	markBlockReceiptsSyncedCalled      bool
-	markBlockReceiptsSyncedBlockNumber uint64
-	markBlockReceiptsSyncedErr         error
+	insertCalled  bool
+	insertedBlock *models.Block
+	insertedTxs   []*models.Transaction
+	insertErr     error
 
-	markBlockReceiptsSyncFailedCalled      bool
-	markBlockReceiptsSyncFailedBlockNumber uint64
-	markBlockReceiptsSyncFailedReason      string
-	markBlockReceiptsSyncFailedErr         error
+	markReceiptsSyncedCalled      bool
+	markReceiptsSyncedChainID     int64
+	markReceiptsSyncedBlockNumber uint64
+	markReceiptsSyncedErr         error
+
+	markReceiptsSyncFailedCalled      bool
+	markReceiptsSyncFailedChainID     int64
+	markReceiptsSyncFailedBlockNumber uint64
+	markReceiptsSyncFailedReason      string
+	markReceiptsSyncFailedErr         error
+}
+
+func (f *fakeBlockSyncStore) GetBlockByNumber(
+	ctx context.Context,
+	chainID int64,
+	number uint64,
+) (*models.Block, bool, error) {
+	f.getCalls = append(f.getCalls, fakeGetBlockCall{
+		chainID: chainID,
+		number:  number,
+	})
+
+	if f.getErr != nil {
+		return nil, false, f.getErr
+	}
+
+	if f.blocks != nil {
+		if block, ok := f.blocks[number]; ok {
+			return block, true, nil
+		}
+	}
+
+	return nil, false, nil
 }
 
 func (f *fakeBlockSyncStore) InsertBlockWithTransactions(
@@ -88,63 +98,46 @@ func (f *fakeBlockSyncStore) InsertBlockWithTransactions(
 	block *models.Block,
 	txs []*models.Transaction,
 ) error {
-	f.insertBlockWithTransactionsCalled = true
-	f.insertBlockArg = block
-	f.insertTxsArg = txs
+	f.insertCalled = true
+	f.insertedBlock = block
+	f.insertedTxs = txs
 
-	if f.insertBlockWithTransactionsErr != nil {
-		return f.insertBlockWithTransactionsErr
-	}
-
-	if f.insertedBlocks == nil {
-		f.insertedBlocks = make(map[uint64]*models.Block)
-	}
-
-	f.insertedBlocks[block.Number] = block
-	return nil
-}
-
-func (f *fakeBlockSyncStore) GetBlockByNumber(ctx context.Context, number uint64) (*models.Block, bool, error) {
-	if f.err != nil {
-		return nil, false, f.err
-	}
-
-	if f.blocks != nil {
-		if block, found := f.blocks[number]; found {
-			return block, true, nil
-		}
-	}
-
-	if f.insertedBlocks != nil {
-		if block, found := f.insertedBlocks[number]; found {
-			return block, true, nil
-		}
-	}
-
-	if f.found && f.block != nil && f.block.Number == number {
-		return f.block, true, nil
-	}
-	return nil, false, nil
-}
-
-func (f *fakeBlockSyncStore) MarkBlockReceiptsSynced(ctx context.Context, blockNumber uint64) error {
-	f.markBlockReceiptsSyncedCalled = true
-	f.markBlockReceiptsSyncedBlockNumber = blockNumber
-
-	if f.markBlockReceiptsSyncedErr != nil {
-		return f.markBlockReceiptsSyncedErr
+	if f.insertErr != nil {
+		return f.insertErr
 	}
 
 	return nil
 }
 
-func (f *fakeBlockSyncStore) MarkBlockReceiptsSyncFailed(ctx context.Context, blockNumber uint64, reason string) error {
-	f.markBlockReceiptsSyncFailedCalled = true
-	f.markBlockReceiptsSyncFailedBlockNumber = blockNumber
-	f.markBlockReceiptsSyncFailedReason = reason
+func (f *fakeBlockSyncStore) MarkBlockReceiptsSynced(
+	ctx context.Context,
+	chainID int64,
+	blockNumber uint64,
+) error {
+	f.markReceiptsSyncedCalled = true
+	f.markReceiptsSyncedChainID = chainID
+	f.markReceiptsSyncedBlockNumber = blockNumber
 
-	if f.markBlockReceiptsSyncFailedErr != nil {
-		return f.markBlockReceiptsSyncFailedErr
+	if f.markReceiptsSyncedErr != nil {
+		return f.markReceiptsSyncedErr
+	}
+
+	return nil
+}
+
+func (f *fakeBlockSyncStore) MarkBlockReceiptsSyncFailed(
+	ctx context.Context,
+	chainID int64,
+	blockNumber uint64,
+	reason string,
+) error {
+	f.markReceiptsSyncFailedCalled = true
+	f.markReceiptsSyncFailedChainID = chainID
+	f.markReceiptsSyncFailedBlockNumber = blockNumber
+	f.markReceiptsSyncFailedReason = reason
+
+	if f.markReceiptsSyncFailedErr != nil {
+		return f.markReceiptsSyncFailedErr
 	}
 
 	return nil
@@ -152,14 +145,15 @@ func (f *fakeBlockSyncStore) MarkBlockReceiptsSyncFailed(ctx context.Context, bl
 
 type fakeBlockReceiptSyncer struct {
 	called         bool
-	calls          int
 	gotBlockNumber uint64
 	err            error
 }
 
-func (f *fakeBlockReceiptSyncer) SyncBlockTransactionReceipts(ctx context.Context, blockNumber uint64) error {
+func (f *fakeBlockReceiptSyncer) SyncBlockTransactionReceipts(
+	ctx context.Context,
+	blockNumber uint64,
+) error {
 	f.called = true
-	f.calls++
 	f.gotBlockNumber = blockNumber
 
 	if f.err != nil {
@@ -173,1505 +167,387 @@ type fakeTransactionConflictReader struct {
 	existingTxs map[string]*models.Transaction
 	err         error
 
-	called bool
-	hashes []string
+	called     bool
+	gotChainID int64
+	gotHashes  []string
 }
 
 func (f *fakeTransactionConflictReader) GetTransactionsByHashes(
 	ctx context.Context,
+	chainID int64,
 	hashes []string,
 ) (map[string]*models.Transaction, error) {
 	f.called = true
-	f.hashes = hashes
+	f.gotChainID = chainID
+	f.gotHashes = append([]string(nil), hashes...)
 
 	if f.err != nil {
 		return nil, f.err
 	}
+
 	if f.existingTxs != nil {
 		return f.existingTxs, nil
 	}
+
 	return map[string]*models.Transaction{}, nil
 }
 
-func assertInsertedBlockSyncState(
-	t *testing.T,
-	block *models.Block,
-	wantTransactionsSynced bool,
-	wantReceiptsSynced bool,
-	wantSyncStatus string,
+func setupBlockServiceChainIDTest() (
+	*BlockService,
+	*fakeChainBlockReader,
+	*fakeBlockSyncStore,
+	*fakeBlockReceiptSyncer,
+	*fakeTransactionConflictReader,
 ) {
-	t.Helper()
-
-	if block == nil {
-		t.Fatalf("expected inserted block, got nil")
+	chainReader := &fakeChainBlockReader{
+		blocks: map[uint64]*ethtypes.Block{},
 	}
 
-	if block.TransactionsSynced != wantTransactionsSynced {
-		t.Fatalf("expected transactions_synced=%v, got %v",
-			wantTransactionsSynced,
-			block.TransactionsSynced,
-		)
+	blockStore := &fakeBlockSyncStore{
+		blocks: map[uint64]*models.Block{},
 	}
 
-	if block.ReceiptsSynced != wantReceiptsSynced {
-		t.Fatalf("expected receipts_synced=%v, got %v",
-			wantReceiptsSynced,
-			block.ReceiptsSynced,
-		)
-	}
-
-	if block.SyncStatus != wantSyncStatus {
-		t.Fatalf("expected sync_status=%s, got %s",
-			wantSyncStatus,
-			block.SyncStatus,
-		)
-	}
-}
-
-type blockServiceTestEnv struct {
-	svc           *BlockService
-	blockRPC      *fakeChainBlockReader
-	blockRepo     *fakeBlockSyncStore
-	receiptSyncer *fakeBlockReceiptSyncer
-	txRepo        *fakeTransactionConflictReader
-}
-
-func setupBlockServiceTestEnv(t *testing.T, startBlock uint64) *blockServiceTestEnv {
-	t.Helper()
-
-	rpc := &fakeChainBlockReader{}
-	blockRepo := &fakeBlockSyncStore{}
 	receiptSyncer := &fakeBlockReceiptSyncer{}
-	txRepo := &fakeTransactionConflictReader{}
 
-	svc := NewBlockService(
-		rpc,
-		blockRepo,
+	txConflictReader := &fakeTransactionConflictReader{
+		existingTxs: map[string]*models.Transaction{},
+	}
+
+	s := NewBlockService(
+		blockServiceTestChainID,
+		chainReader,
+		blockStore,
 		receiptSyncer,
-		txRepo,
-		startBlock,
+		txConflictReader,
+		blockServiceStartBlock,
 	)
 
-	return &blockServiceTestEnv{
-		svc:           svc,
-		blockRepo:     blockRepo,
-		blockRPC:      rpc,
-		txRepo:        txRepo,
-		receiptSyncer: receiptSyncer,
-	}
+	return s, chainReader, blockStore, receiptSyncer, txConflictReader
 }
 
-func setupTestService(t *testing.T) (*BlockService, *fakeBlockSyncStore, *fakeChainBlockReader) {
-	t.Helper()
-
-	env := setupBlockServiceTestEnv(t, 20)
-
-	return env.svc, env.blockRepo, env.blockRPC
-}
-
-func setupTestServiceWithStartBlock(
-	t *testing.T,
-	startBlock uint64,
-) (*BlockService, *fakeBlockSyncStore, *fakeChainBlockReader) {
-	t.Helper()
-
-	env := setupBlockServiceTestEnv(t, startBlock)
-
-	return env.svc, env.blockRepo, env.blockRPC
-}
-
-func setupTestServiceWithReceiptSyncer(
-	t *testing.T,
-) (*BlockService, *fakeBlockSyncStore, *fakeChainBlockReader, *fakeBlockReceiptSyncer) {
-	t.Helper()
-
-	env := setupBlockServiceTestEnv(t, 20)
-
-	return env.svc, env.blockRepo, env.blockRPC, env.receiptSyncer
-}
-
-func setupTestServiceWithReceiptSyncerAndStartBlock(
-	t *testing.T,
-	startBlock uint64,
-) (*BlockService, *fakeChainBlockReader, *fakeBlockSyncStore, *fakeBlockReceiptSyncer) {
-	t.Helper()
-
-	env := setupBlockServiceTestEnv(t, startBlock)
-
-	return env.svc, env.blockRPC, env.blockRepo, env.receiptSyncer
-}
-
-func TestBlockService_GetBlockByNumber_DBHit(t *testing.T) {
-	svc, repo, _ := setupTestService(t)
-
-	repo.block = &models.Block{
-		Number: 20,
-		Hash:   "0x123",
-	}
-	repo.found = true
-	repo.err = nil
-
-	result, err := svc.GetBlockByNumber(context.Background(), 20)
-	if err != nil {
-		t.Fatalf("expected nil error, got %v", err)
-	}
-	if result.Block.Number != 20 {
-		t.Fatalf("expected block number 20, got %d", result.Block.Number)
-	}
-	if result.Block.Hash != "0x123" {
-		t.Fatalf("expected block hash \"0x123\", got %s", result.Block.Hash)
-	}
-}
-
-func TestBlockService_GetBlockByNumber_DBError(t *testing.T) {
-	svc, repo, _ := setupTestService(t)
-
-	repo.block = nil
-	repo.found = false
-	repo.err = types.ErrDBTimeout
-
-	_, err := svc.GetBlockByNumber(context.Background(), 20)
-	if err == nil {
-		t.Fatalf("expected error, got nil")
-	}
-	if !errors.Is(err, types.ErrDBTimeout) {
-		t.Fatalf("expected timeout error, got %v", err)
-	}
-}
-
-func TestBlockService_GetBlockByNumber_RPCSuccess(t *testing.T) {
-	svc, repo, rpc := setupTestService(t)
-
-	repo.block = nil
-	repo.found = false
-	repo.err = nil
-
-	rpc.block = ethtypes.NewBlockWithHeader(&ethtypes.Header{
-		Number: big.NewInt(20),
-	})
-	rpc.err = nil
-
-	result, err := svc.GetBlockByNumber(context.Background(), 20)
-	if err != nil {
-		t.Fatalf("expected nil error, got %v", err)
-	}
-	if result.Block.Number != 20 {
-		t.Fatalf("expected block number 20, got %d", result.Block.Number)
-	}
-}
-
-func TestBlockService_GetBlockByNumber_RPCNotFound(t *testing.T) {
-	svc, repo, rpc := setupTestService(t)
-
-	repo.block = nil
-	repo.found = false
-	repo.err = nil
-
-	rpc.err = types.ErrBlockNotFound
-	_, err := svc.GetBlockByNumber(context.Background(), 20)
-	if err == nil {
-		t.Fatalf("expected error, got nil")
-	}
-	if !errors.Is(err, types.ErrBlockNotFound) {
-		t.Fatalf("expected RPCNotFound, got %v", err)
-	}
-}
-
-func TestBlockService_SyncBlockToDB_EmptyBlock_Success(t *testing.T) {
-	svc, repo, rpc := setupTestService(t)
-
-	rpc.block = ethtypes.NewBlockWithHeader(&ethtypes.Header{
-		Number: big.NewInt(20),
-	})
-	rpc.err = nil
-
-	err := svc.SyncBlockToDB(context.Background(), 20)
-	if err != nil {
-		t.Fatalf("expected nil error, got %v", err)
-	}
-
-	if !repo.insertBlockWithTransactionsCalled {
-		t.Fatalf("expected InsertBlockWithTransactions to be called")
-	}
-
-	if repo.insertBlockArg == nil {
-		t.Fatalf("expected inserted block, got nil")
-	}
-
-	if repo.insertBlockArg.Number != 20 {
-		t.Fatalf("expected inserted block number=20, got %d", repo.insertBlockArg.Number)
-	}
-	if len(repo.insertTxsArg) != 0 {
-		t.Fatalf("expected 0 transactions, got %d", len(repo.insertTxsArg))
-	}
-	if rpc.getChainIDCalled {
-		t.Fatalf("expected GetChainID not to be called for empty block")
-	}
-}
-
-func newSignedTestTransaction(t *testing.T, chainID *big.Int, nonce uint64, to common.Address) (*ethtypes.Transaction, common.Address) {
-	t.Helper()
-
-	privateKey, err := crypto.GenerateKey()
-	if err != nil {
-		t.Fatalf("generate private key: %v", err)
-	}
-
-	from := crypto.PubkeyToAddress(privateKey.PublicKey)
-
-	tx := ethtypes.NewTx(&ethtypes.LegacyTx{
-		Nonce:    nonce,
-		To:       &to,
-		Value:    big.NewInt(1000000000000000000),
-		Gas:      21000,
-		GasPrice: big.NewInt(1000000000),
-		Data:     []byte{0x01, 0x02},
-	})
-
-	signer := ethtypes.LatestSignerForChainID(chainID)
-
-	signedTx, err := ethtypes.SignTx(tx, signer, privateKey)
-	if err != nil {
-		t.Fatalf("sign tx: %v", err)
-	}
-
-	return signedTx, from
-}
-
-func newTestBlockWithTransactions(number uint64, txs []*ethtypes.Transaction) *ethtypes.Block {
+func newBlockServiceTestRPCBlock(number uint64, parentHash common.Hash) *ethtypes.Block {
 	header := &ethtypes.Header{
-		Number: big.NewInt(int64(number)),
-	}
-
-	return ethtypes.NewBlockWithHeader(header).WithBody(ethtypes.Body{
-		Transactions: txs,
-	})
-}
-
-func TestBlockService_SyncBlockToDB_InsertsBlockWithTransactions(t *testing.T) {
-	svc, repo, rpc := setupTestService(t)
-
-	chainID := big.NewInt(1)
-	rpc.chainID = chainID
-
-	to := common.HexToAddress("0x2222222222222222222222222222222222222222")
-
-	signedTx, expectedFrom := newSignedTestTransaction(t, chainID, 1, to)
-
-	rpc.block = newTestBlockWithTransactions(20, []*ethtypes.Transaction{
-		signedTx,
-	})
-	rpc.err = nil
-
-	err := svc.SyncBlockToDB(context.Background(), 20)
-	if err != nil {
-		t.Fatalf("expected nil error, got %v", err)
-	}
-
-	if !repo.insertBlockWithTransactionsCalled {
-		t.Fatalf("expected InsertBlockWithTransactions to be called")
-	}
-
-	if repo.insertBlockArg == nil {
-		t.Fatalf("expected inserted block, got nil")
-	}
-
-	if repo.insertBlockArg.Number != 20 {
-		t.Fatalf("expected inserted block number=20, got %d", repo.insertBlockArg.Number)
-	}
-
-	if len(repo.insertTxsArg) != 1 {
-		t.Fatalf("expected 1 transaction, got %d", len(repo.insertTxsArg))
-	}
-
-	gotTx := repo.insertTxsArg[0]
-	if gotTx.Hash != signedTx.Hash().Hex() {
-		t.Fatalf("expected tx hash=%s, got %s", signedTx.Hash().Hex(), gotTx.Hash)
-	}
-
-	if gotTx.BlockNumber != 20 {
-		t.Fatalf("expected tx block number=20, got %d", gotTx.BlockNumber)
-	}
-
-	if gotTx.BlockHash != rpc.block.Hash().Hex() {
-		t.Fatalf("expected tx block hash=%s, got %s", rpc.block.Hash().Hex(), gotTx.BlockHash)
-	}
-
-	if gotTx.TxIndex != 0 {
-		t.Fatalf("expected tx index=0, got %d", gotTx.TxIndex)
-	}
-
-	if !strings.EqualFold(gotTx.FromAddress, expectedFrom.Hex()) {
-		t.Fatalf("expected from address=%s, got %s", expectedFrom.Hex(), gotTx.FromAddress)
-	}
-
-	if !strings.EqualFold(gotTx.ToAddress, to.Hex()) {
-		t.Fatalf("expected to address=%s, got %s", to.Hex(), gotTx.ToAddress)
-	}
-
-	if gotTx.ValueWei != "1000000000000000000" {
-		t.Fatalf("expected value wei=1000000000000000000, got %s", gotTx.ValueWei)
-	}
-
-	if gotTx.GasLimit != 21000 {
-		t.Fatalf("expected gas limit=21000, got %d", gotTx.GasLimit)
-	}
-
-	if gotTx.GasPriceWei != "1000000000" {
-		t.Fatalf("expected gas price wei=1000000000, got %s", gotTx.GasPriceWei)
-	}
-
-	if gotTx.InputData != "0x0102" {
-		t.Fatalf("expected input data=0x0102, got %s", gotTx.InputData)
-	}
-
-}
-
-func TestBlockService_SyncBlockToDB_BackfillsTransactionsWhenBlockAlreadyExistsWithSameHash(t *testing.T) {
-	svc, repo, rpc := setupTestService(t)
-
-	chainID := big.NewInt(1)
-	rpc.chainID = chainID
-
-	to := common.HexToAddress("0x2222222222222222222222222222222222222222")
-
-	signedTx, expectedFrom := newSignedTestTransaction(t, chainID, 1, to)
-
-	rpc.block = newTestBlockWithTransactions(20, []*ethtypes.Transaction{
-		signedTx,
-	})
-	rpc.err = nil
-
-	repo.block = &models.Block{
-		Number: 20,
-	}
-	repo.found = true
-	repo.block.Hash = rpc.block.Hash().Hex()
-
-	err := svc.SyncBlockToDB(context.Background(), 20)
-	if err != nil {
-		t.Fatalf("expected nil error, got %v", err)
-	}
-
-	if !repo.insertBlockWithTransactionsCalled {
-		t.Fatalf("expected InsertBlockWithTransactions to be called")
-	}
-
-	if repo.insertBlockArg == nil {
-		t.Fatalf("expected inserted block, got nil")
-	}
-
-	if repo.insertBlockArg.Number != 20 {
-		t.Fatalf("expected inserted block number=20, got %d", repo.insertBlockArg.Number)
-	}
-
-	if len(repo.insertTxsArg) != 1 {
-		t.Fatalf("expected 1 transaction, got %d", len(repo.insertTxsArg))
-	}
-
-	gotTx := repo.insertTxsArg[0]
-
-	if gotTx.Hash != signedTx.Hash().Hex() {
-		t.Fatalf("expected tx hash=%s, got %s", signedTx.Hash().Hex(), gotTx.Hash)
-	}
-
-	if gotTx.BlockNumber != 20 {
-		t.Fatalf("expected tx block number=20, got %d", gotTx.BlockNumber)
-	}
-
-	if !strings.EqualFold(gotTx.FromAddress, expectedFrom.Hex()) {
-		t.Fatalf("expected from address=%s, got %s", expectedFrom.Hex(), gotTx.FromAddress)
-	}
-
-	if !strings.EqualFold(gotTx.ToAddress, to.Hex()) {
-		t.Fatalf("expected to address=%s, got %s", to.Hex(), gotTx.ToAddress)
-	}
-}
-
-func TestBlockService_SyncBlockToDB_ReturnsErrReorgDetectedWhenSameHeightHasDifferentHash(t *testing.T) {
-	svc, repo, rpc := setupTestService(t)
-
-	chainID := big.NewInt(1)
-	rpc.chainID = chainID
-
-	to := common.HexToAddress("0x2222222222222222222222222222222222222222")
-	signedTx, _ := newSignedTestTransaction(t, chainID, 1, to)
-
-	rpc.block = newTestBlockWithTransactions(20, []*ethtypes.Transaction{
-		signedTx,
-	})
-	rpc.err = nil
-
-	rpcHash := rpc.block.Hash().Hex()
-	dbHash := common.HexToHash("0xbbbb").Hex()
-
-	if strings.EqualFold(rpcHash, dbHash) {
-		t.Fatalf("test setup invalid: rpc hash equals db hash")
-	}
-
-	repo.block = &models.Block{
-		Number: 20,
-		Hash:   dbHash,
-	}
-	repo.found = true
-
-	err := svc.SyncBlockToDB(context.Background(), 20)
-	if err == nil {
-		t.Fatalf("expected error, got nil")
-	}
-
-	if !errors.Is(err, types.ErrReorgDetected) {
-		t.Fatalf("expected ErrReorgDetected, got %v", err)
-	}
-
-	if rpc.getChainIDCalled {
-		t.Fatalf("expected GetChainID not to be called when reorg is detected")
-	}
-
-	if repo.insertBlockWithTransactionsCalled {
-		t.Fatalf("expected InsertBlockWithTransactions not to be called")
-	}
-}
-
-func TestBlockService_SyncBlockToDB_RPCNotFound(t *testing.T) {
-	svc, repo, rpc := setupTestService(t)
-	rpc.block = nil
-	rpc.err = types.ErrBlockNotFound
-	err := svc.SyncBlockToDB(context.Background(), 20)
-	if err == nil {
-		t.Fatalf("expected error, got nil")
-	}
-	if !errors.Is(err, types.ErrBlockNotFound) {
-		t.Fatalf("expected ErrBlockNotFound, got %v", err)
-	}
-	if repo.insertBlockWithTransactionsCalled {
-		t.Fatalf("expected InsertBlockWithTransactions not to be called")
-	}
-}
-
-func TestBlockService_SyncBlockToDB_RPCError(t *testing.T) {
-	svc, repo, rpc := setupTestService(t)
-	rpc.block = nil
-	rpc.err = types.ErrRPCTimeout
-	err := svc.SyncBlockToDB(context.Background(), 20)
-	if err == nil {
-		t.Fatalf("expected error, got nil")
-	}
-	if !errors.Is(err, types.ErrRPCTimeout) {
-		t.Fatalf("expected ErrRPCTimeout, got %v", err)
-	}
-	if repo.insertBlockWithTransactionsCalled {
-		t.Fatalf("expected InsertBlockWithTransactions not to be called")
-	}
-}
-
-func TestBlockService_SyncBlockToDB_InsertBlockWithTransactionsError(t *testing.T) {
-	svc, repo, rpc := setupTestService(t)
-
-	rpc.block = ethtypes.NewBlockWithHeader(&ethtypes.Header{
-		Number: big.NewInt(20),
-	})
-	rpc.err = nil
-
-	repo.insertBlockWithTransactionsErr = errors.New("some error")
-
-	err := svc.SyncBlockToDB(context.Background(), 20)
-	if err == nil {
-		t.Fatalf("expected error, got nil")
-	}
-
-	if !repo.insertBlockWithTransactionsCalled {
-		t.Fatalf("expected InsertBlockWithTransactions to be called")
-	}
-
-	if repo.insertBlockArg == nil {
-		t.Fatalf("expected insertBlockArg not nil")
-	}
-
-	if repo.insertBlockArg.Number != 20 {
-		t.Fatalf("expected inserted block number=20, got %d", repo.insertBlockArg.Number)
-	}
-}
-
-func TestBlockService_SyncBlockToDB_InsertsBlockWhenParentHashMatches(t *testing.T) {
-	svc, repo, rpc := setupTestService(t)
-
-	parentHash := common.HexToHash("0xaaa")
-
-	rpc.block = ethtypes.NewBlockWithHeader(&ethtypes.Header{
-		Number:     big.NewInt(100),
+		Number:     big.NewInt(int64(number)),
 		ParentHash: parentHash,
-	})
-
-	repo.blocks = map[uint64]*models.Block{
-		99: {
-			Number: 99,
-			Hash:   parentHash.Hex(),
-		},
+		Coinbase:   common.HexToAddress("0x000000000000000000000000000000000000beef"),
+		Time:       1710000000,
+		GasLimit:   30000000,
+		GasUsed:    21000,
 	}
 
-	err := svc.SyncBlockToDB(context.Background(), 100)
+	return ethtypes.NewBlockWithHeader(header)
+}
+
+func newBlockServiceTestDBBlock(
+	chainID int64,
+	number uint64,
+	hash string,
+	parentHash string,
+) *models.Block {
+	return &models.Block{
+		ChainID:    chainID,
+		Number:     number,
+		Hash:       hash,
+		ParentHash: parentHash,
+		Timestamp:  1710000000,
+		Miner:      "0x000000000000000000000000000000000000beef",
+		GasLimit:   30000000,
+		GasUsed:    21000,
+		TxCount:    0,
+	}
+}
+
+func TestBlockService_GetBlockByNumber_FromDBPassesChainID(t *testing.T) {
+	s, chainReader, blockStore, _, _ := setupBlockServiceChainIDTest()
+
+	number := uint64(100)
+	dbBlock := newBlockServiceTestDBBlock(
+		blockServiceTestChainID,
+		number,
+		"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+	)
+
+	blockStore.blocks[number] = dbBlock
+
+	got, err := s.GetBlockByNumber(context.Background(), number)
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
 
-	if !repo.insertBlockWithTransactionsCalled {
-		t.Fatalf("expected insertBlockWithTransactions to be called")
-	}
-	if repo.insertBlockArg == nil {
-		t.Fatalf("expected inserted block, got nil")
+	if len(blockStore.getCalls) != 1 {
+		t.Fatalf("expected 1 get block call, got %d", len(blockStore.getCalls))
 	}
 
-	if repo.insertBlockArg.Number != 100 {
-		t.Fatalf("expected inserted block number=100, got %d", repo.insertBlockArg.Number)
+	if blockStore.getCalls[0].chainID != blockServiceTestChainID {
+		t.Fatalf("expected chain_id=%d, got %d", blockServiceTestChainID, blockStore.getCalls[0].chainID)
+	}
+
+	if blockStore.getCalls[0].number != number {
+		t.Fatalf("expected block number=%d, got %d", number, blockStore.getCalls[0].number)
+	}
+
+	if chainReader.called {
+		t.Fatalf("expected rpc reader not called when block exists in db")
+	}
+
+	if got.Source != servicemodel.DataSourceDB {
+		t.Fatalf("expected source=%s, got %s", servicemodel.DataSourceDB, got.Source)
+	}
+
+	if got.Block.ChainID != blockServiceTestChainID {
+		t.Fatalf("expected result chain_id=%d, got %d", blockServiceTestChainID, got.Block.ChainID)
+	}
+
+	if got.Block.Number != number {
+		t.Fatalf("expected block number=%d, got %d", number, got.Block.Number)
+	}
+
+	if got.Block.Hash != dbBlock.Hash {
+		t.Fatalf("expected hash=%s, got %s", dbBlock.Hash, got.Block.Hash)
 	}
 }
 
-func TestBlockService_SyncBlockToDB_AllowsSyncFromLocalStartBlockWhenParentIsMissing(t *testing.T) {
-	svc, repo, rpc := setupTestServiceWithStartBlock(t, 100)
-	rpc.block = ethtypes.NewBlockWithHeader(&ethtypes.Header{
-		Number:     big.NewInt(100),
-		ParentHash: common.HexToHash("0xaaa"),
-	})
-	repo.blocks = map[uint64]*models.Block{}
-	err := svc.SyncBlockToDB(context.Background(), 100)
+func TestBlockService_GetBlockByNumber_FromRPCUsesServiceChainID(t *testing.T) {
+	s, chainReader, blockStore, _, _ := setupBlockServiceChainIDTest()
+
+	number := uint64(100)
+	parentHash := common.HexToHash("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+	rpcBlock := newBlockServiceTestRPCBlock(number, parentHash)
+
+	chainReader.blocks[number] = rpcBlock
+
+	got, err := s.GetBlockByNumber(context.Background(), number)
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
 
-	if !repo.insertBlockWithTransactionsCalled {
-		t.Fatalf("expected InsertBlockWithTransactions to be called")
+	if len(blockStore.getCalls) != 1 {
+		t.Fatalf("expected 1 get block call, got %d", len(blockStore.getCalls))
 	}
 
-	if repo.insertBlockArg == nil {
+	if blockStore.getCalls[0].chainID != blockServiceTestChainID {
+		t.Fatalf("expected chain_id=%d, got %d", blockServiceTestChainID, blockStore.getCalls[0].chainID)
+	}
+
+	if !chainReader.called {
+		t.Fatalf("expected rpc reader called")
+	}
+
+	if chainReader.gotNumber != number {
+		t.Fatalf("expected rpc block number=%d, got %d", number, chainReader.gotNumber)
+	}
+
+	if got.Source != servicemodel.DataSourceRPC {
+		t.Fatalf("expected source=%s, got %s", servicemodel.DataSourceRPC, got.Source)
+	}
+
+	if got.Block.ChainID != blockServiceTestChainID {
+		t.Fatalf("expected result chain_id=%d, got %d", blockServiceTestChainID, got.Block.ChainID)
+	}
+
+	if got.Block.Number != number {
+		t.Fatalf("expected block number=%d, got %d", number, got.Block.Number)
+	}
+
+	if got.Block.Hash != rpcBlock.Hash().Hex() {
+		t.Fatalf("expected hash=%s, got %s", rpcBlock.Hash().Hex(), got.Block.Hash)
+	}
+}
+
+func TestBlockService_SyncBlockToDB_EmptyBlockInsertsBlockWithChainID(t *testing.T) {
+	s, chainReader, blockStore, receiptSyncer, _ := setupBlockServiceChainIDTest()
+
+	number := blockServiceStartBlock
+	parentHash := common.HexToHash("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+	rpcBlock := newBlockServiceTestRPCBlock(number, parentHash)
+
+	chainReader.blocks[number] = rpcBlock
+
+	err := s.SyncBlockToDB(context.Background(), number)
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+
+	if !blockStore.insertCalled {
+		t.Fatalf("expected block inserted")
+	}
+
+	if blockStore.insertedBlock == nil {
 		t.Fatalf("expected inserted block, got nil")
 	}
 
-	if repo.insertBlockArg.Number != 100 {
-		t.Fatalf("expected inserted block number=100, got %d", repo.insertBlockArg.Number)
+	if blockStore.insertedBlock.ChainID != blockServiceTestChainID {
+		t.Fatalf("expected inserted block chain_id=%d, got %d", blockServiceTestChainID, blockStore.insertedBlock.ChainID)
 	}
 
-	if len(repo.insertTxsArg) != 0 {
-		t.Fatalf("expected 0 transactions, got %d", len(repo.insertTxsArg))
-	}
-}
-
-func TestBlockService_SyncBlockToDB_ReturnsErrChainDiscontinuityWhenParentMissingAfterStartBlock(t *testing.T) {
-	svc, repo, rpc := setupTestServiceWithStartBlock(t, 100)
-
-	rpc.block = ethtypes.NewBlockWithHeader(&ethtypes.Header{
-		Number:     big.NewInt(101),
-		ParentHash: common.HexToHash("0xaaa"),
-	})
-	repo.blocks = map[uint64]*models.Block{}
-
-	err := svc.SyncBlockToDB(context.Background(), 101)
-	if err == nil {
-		t.Fatalf("expected error, got nil")
+	if blockStore.insertedBlock.Number != number {
+		t.Fatalf("expected inserted block number=%d, got %d", number, blockStore.insertedBlock.Number)
 	}
 
-	if !errors.Is(err, types.ErrChainDiscontinuity) {
-		t.Fatalf("expected ErrChainDiscontinuity, got %v", err)
+	if blockStore.insertedBlock.Hash != rpcBlock.Hash().Hex() {
+		t.Fatalf("expected inserted block hash=%s, got %s", rpcBlock.Hash().Hex(), blockStore.insertedBlock.Hash)
 	}
 
-	if repo.insertBlockWithTransactionsCalled {
-		t.Fatalf("expected InsertBlockWithTransactions not to be called")
-	}
-}
-
-func TestBlockService_SyncBlockToDB_ReturnsErrChainDiscontinuityWhenParentHashMismatch(t *testing.T) {
-	svc, repo, rpc := setupTestService(t)
-
-	rpcParentHash := common.HexToHash("0xaaa")
-	dbParentHash := common.HexToHash("0xbbb")
-	rpc.block = ethtypes.NewBlockWithHeader(&ethtypes.Header{
-		Number:     big.NewInt(100),
-		ParentHash: rpcParentHash,
-	})
-	repo.blocks = map[uint64]*models.Block{
-		99: {
-			Number: 99,
-			Hash:   dbParentHash.Hex(),
-		},
+	if !blockStore.insertedBlock.TransactionsSynced {
+		t.Fatalf("expected TransactionsSynced=true")
 	}
 
-	err := svc.SyncBlockToDB(context.Background(), 100)
-	if !errors.Is(err, types.ErrChainDiscontinuity) {
-		t.Fatalf("expected ErrChainDiscontinuity, got %v", err)
-	}
-	if repo.insertBlockWithTransactionsCalled {
-		t.Fatalf("expected InsertBlockWithTransactions not to be called")
-	}
-}
-
-func newLinkedTestBlocks(numbers ...uint64) map[uint64]*ethtypes.Block {
-	blocks := make(map[uint64]*ethtypes.Block, len(numbers))
-
-	var parentHash common.Hash
-	for i, number := range numbers {
-		header := &ethtypes.Header{
-			Number: big.NewInt(int64(number)),
-		}
-
-		if i > 0 {
-			header.ParentHash = parentHash
-		}
-
-		block := ethtypes.NewBlockWithHeader(header)
-		blocks[number] = block
-		parentHash = block.Hash()
+	if !blockStore.insertedBlock.ReceiptsSynced {
+		t.Fatalf("expected ReceiptsSynced=true for empty block")
 	}
 
-	return blocks
-}
-
-func TestBlockService_SyncBlockRangeToDB_AllSuccess(t *testing.T) {
-	svc, repo, rpc := setupTestServiceWithStartBlock(t, 10)
-
-	rpc.blocks = newLinkedTestBlocks(10, 11, 12)
-
-	result, err := svc.SyncBlockRangeToDB(context.Background(), 10, 12)
-	switch {
-	case err != nil:
-		t.Fatalf("expected nil error, got %v", err)
-	case result.Requested != 3:
-		t.Fatalf("expected requested=3, got %d", result.Requested)
-	case result.Succeeded != 3:
-		t.Fatalf("expected succeeded=3, got %d", result.Succeeded)
-	case result.Failed != 0:
-		t.Fatalf("expected failed=0, got %d", result.Failed)
-	case len(repo.insertedBlocks) != 3:
-		t.Fatalf("expected 3 inserted blocks, got %d", len(repo.insertedBlocks))
-	}
-}
-
-func TestBlockService_SyncBlockRangeToDB_ErrInvalidBlockRange(t *testing.T) {
-	svc, _, _ := setupTestService(t)
-
-	result, err := svc.SyncBlockRangeToDB(context.Background(), 10, 9)
-	if err == nil {
-		t.Fatalf("expected error, got nil")
-	}
-	if !errors.Is(err, types.ErrInvalidBlockRange) {
-		t.Fatalf("expected ErrInvalidBlockRange, got %v", err)
-	}
-	if result != nil {
-		t.Fatalf("expected nil block, got %v", result)
-	}
-}
-
-func TestBlockService_SyncBlockRangeToDB_ErrBlockRangeTooLarge(t *testing.T) {
-	svc, _, _ := setupTestService(t)
-
-	result, err := svc.SyncBlockRangeToDB(context.Background(), 1, 200)
-	if err == nil {
-		t.Fatalf("expected error, got nil")
-	}
-	if !errors.Is(err, types.ErrBlockRangeTooLarge) {
-		t.Fatalf("expected ErrBlockRangeTooLarge, got %v", err)
-	}
-	if result != nil {
-		t.Fatalf("expected nil block, got %v", result)
-	}
-}
-
-func TestBlockService_SyncBlockRangeToDB_Canceled(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	svc, repo, rpc := setupTestServiceWithStartBlock(t, 10)
-
-	rpc.blocks = newLinkedTestBlocks(10, 11, 12)
-
-	rpc.onGetBlock = func(number uint64) {
-		if number == 11 {
-			cancel()
-		}
+	if blockStore.insertedBlock.SyncStatus != models.BlockSyncStatusCompleted {
+		t.Fatalf("expected sync status=%s, got %s", models.BlockSyncStatusCompleted, blockStore.insertedBlock.SyncStatus)
 	}
 
-	result, err := svc.SyncBlockRangeToDB(ctx, 10, 12)
-	if err == nil {
-		t.Fatalf("expected error, got nil")
-	}
-	if !errors.Is(err, types.ErrRequestCanceled) {
-		t.Fatalf("expected context.Canceled error, got %v", err)
-	}
-	if result.Succeeded != 2 {
-		t.Fatalf("expected succeeded=2, got %d", result.Succeeded)
-	}
-	if len(repo.insertedBlocks) != 2 {
-		t.Fatalf("expected 2 inserted blocks, got %d", len(repo.insertedBlocks))
-	}
-}
-
-func TestBlockService_SyncBlockRangeToDB_PartialFailureDoesNotCreateDiscontinuousChain(t *testing.T) {
-	svc, repo, rpc := setupTestServiceWithStartBlock(t, 10)
-
-	blocks := newLinkedTestBlocks(10, 11, 12)
-
-	rpc.blocks = map[uint64]*ethtypes.Block{
-		10: blocks[10],
-		12: blocks[12],
-	}
-	rpc.errs = map[uint64]error{
-		11: errors.New("some error"),
-	}
-
-	result, err := svc.SyncBlockRangeToDB(context.Background(), 10, 12)
-	if err == nil {
-		t.Fatalf("expected error, got nil")
-	}
-	if !errors.Is(err, types.ErrChainDiscontinuity) {
-		t.Fatalf("expected ErrChainDiscontinuity, got %v", err)
-	}
-
-	if result == nil {
-		t.Fatalf("expected result, got nil")
-	}
-
-	if result.Succeeded != 1 {
-		t.Fatalf("expected succeeded=1, got %d", result.Succeeded)
-	}
-	if result.Failed != 2 {
-		t.Fatalf("expected failed=2, got %d", result.Failed)
-	}
-	if len(result.FailedBlocks) != 2 || result.FailedBlocks[0] != 11 || result.FailedBlocks[1] != 12 {
-		t.Fatalf("expected failed blocks [11 12], got %+v", result.FailedBlocks)
-	}
-	if len(repo.insertedBlocks) != 1 {
-		t.Fatalf("expected 1 inserted block, got %d", len(repo.insertedBlocks))
-	}
-}
-
-func TestBlockService_SyncBlockRangeToDB_ReturnsErrWhenReorgDetected(t *testing.T) {
-	svc, repo, rpc := setupTestService(t)
-	rpc.blocks = map[uint64]*ethtypes.Block{
-		100: ethtypes.NewBlockWithHeader(&ethtypes.Header{
-			Number: big.NewInt(100),
-		}),
-		101: ethtypes.NewBlockWithHeader(&ethtypes.Header{
-			Number: big.NewInt(101),
-		}),
-	}
-	repo.blocks = map[uint64]*models.Block{
-		100: {
-			Number: 100,
-			Hash:   common.HexToHash("0xbbbb").Hex(),
-		},
-	}
-	result, err := svc.SyncBlockRangeToDB(context.Background(), 100, 101)
-	if !errors.Is(err, types.ErrReorgDetected) {
-		t.Fatalf("expected ErrReorgDetected, got %v", err)
-	}
-
-	if result == nil {
-		t.Fatalf("expected result, got nil")
-	}
-
-	if result.Failed != 1 {
-		t.Fatalf("expected failed=1, got %d", result.Failed)
-	}
-
-	if len(result.FailedBlocks) != 1 || result.FailedBlocks[0] != 100 {
-		t.Fatalf("expected failed block 100, got %+v", result.FailedBlocks)
-	}
-}
-
-func TestBlockService_SyncBlockRangeToDB_ReturnsErrWhenChainDiscontinuityDetected(t *testing.T) {
-	svc, repo, rpc := setupTestService(t)
-
-	rpcParentHash := common.HexToHash("0xaaa")
-	dbParentHash := common.HexToHash("0xbbb")
-
-	rpc.blocks = map[uint64]*ethtypes.Block{
-		100: ethtypes.NewBlockWithHeader(&ethtypes.Header{
-			Number:     big.NewInt(100),
-			ParentHash: rpcParentHash,
-		}),
-		101: ethtypes.NewBlockWithHeader(&ethtypes.Header{
-			Number: big.NewInt(101),
-		}),
-	}
-
-	repo.blocks = map[uint64]*models.Block{
-		99: {
-			Number: 99,
-			Hash:   dbParentHash.Hex(),
-		},
-	}
-	result, err := svc.SyncBlockRangeToDB(context.Background(), 100, 101)
-	if !errors.Is(err, types.ErrChainDiscontinuity) {
-		t.Fatalf("expected ErrChainDiscontinuity, got %v", err)
-	}
-
-	if result == nil {
-		t.Fatalf("expected result, got nil")
-	}
-
-	if result.Failed != 1 {
-		t.Fatalf("expected failed=1, got %d", result.Failed)
-	}
-
-	if len(result.FailedBlocks) != 1 || result.FailedBlocks[0] != 100 {
-		t.Fatalf("expected failed block 100, got %+v", result.FailedBlocks)
-	}
-}
-
-func TestBlockService_SyncBlockToDB_DoesNotSyncReceiptsWhenInsertBlockWithTransactionsFails(t *testing.T) {
-	svc, repo, rpc, receiptSyncer := setupTestServiceWithReceiptSyncer(t)
-
-	rpc.block = ethtypes.NewBlockWithHeader(&ethtypes.Header{
-		Number: big.NewInt(20),
-	})
-	rpc.err = nil
-
-	insertErr := errors.New("insert block with transactions error")
-	repo.insertBlockWithTransactionsErr = insertErr
-
-	err := svc.SyncBlockToDB(context.Background(), 20)
-	if err == nil {
-		t.Fatalf("expected error, got nil")
-	}
-
-	if !errors.Is(err, insertErr) {
-		t.Fatalf("expected insert error, got %v", err)
-	}
-
-	if !strings.Contains(err.Error(), "insert block 20 into db") {
-		t.Fatalf("expected wrapped insert error, got %v", err)
-	}
-
-	if !repo.insertBlockWithTransactionsCalled {
-		t.Fatalf("expected InsertBlockWithTransactions to be called")
+	if len(blockStore.insertedTxs) != 0 {
+		t.Fatalf("expected no inserted txs, got %d", len(blockStore.insertedTxs))
 	}
 
 	if receiptSyncer.called {
-		t.Fatalf("expected SyncBlockTransactionReceipts not to be called")
+		t.Fatalf("expected receipt syncer not called for empty block")
 	}
 
-	if receiptSyncer.calls != 0 {
-		t.Fatalf("expected 0 receipt sync calls, got %d", receiptSyncer.calls)
+	if blockStore.markReceiptsSyncedCalled {
+		t.Fatalf("expected MarkBlockReceiptsSynced not called for empty block")
 	}
 
-	if repo.markBlockReceiptsSyncedCalled {
-		t.Fatalf("expected MarkBlockReceiptsSynced not to be called")
-	}
-
-	if repo.markBlockReceiptsSyncFailedCalled {
-		t.Fatalf("expected MarkBlockReceiptsSyncFailed not to be called")
+	for _, call := range blockStore.getCalls {
+		if call.chainID != blockServiceTestChainID {
+			t.Fatalf("expected all get block calls use chain_id=%d, got %d for block %d", blockServiceTestChainID, call.chainID, call.number)
+		}
 	}
 }
 
-func TestBlockService_SyncBlockToDB_EmptyBlock_CompletesWithoutReceiptSync(t *testing.T) {
-	svc, repo, rpc, receiptSyncer := setupTestServiceWithReceiptSyncer(t)
+func TestBlockService_ValidateBlockForSync_ParentContinuityUsesChainID(t *testing.T) {
+	s, _, blockStore, _, _ := setupBlockServiceChainIDTest()
 
-	rpc.block = ethtypes.NewBlockWithHeader(&ethtypes.Header{
-		Number: big.NewInt(20),
-	})
-	rpc.err = nil
+	parentNumber := uint64(100)
+	childNumber := uint64(101)
 
-	err := svc.SyncBlockToDB(context.Background(), 20)
+	parentHash := "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	childHash := "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
+	blockStore.blocks[parentNumber] = newBlockServiceTestDBBlock(
+		blockServiceTestChainID,
+		parentNumber,
+		parentHash,
+		"0xparentparent",
+	)
+
+	childBlock := &models.Block{
+		ChainID:    blockServiceTestChainID,
+		Number:     childNumber,
+		Hash:       childHash,
+		ParentHash: parentHash,
+	}
+
+	err := s.validateBlockForSync(context.Background(), childBlock)
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
 
-	if !repo.insertBlockWithTransactionsCalled {
-		t.Fatalf("expected InsertBlockWithTransactions to be called")
+	if len(blockStore.getCalls) != 2 {
+		t.Fatalf("expected 2 get block calls, got %d", len(blockStore.getCalls))
 	}
 
-	if repo.insertBlockArg == nil {
-		t.Fatalf("expected inserted block, got nil")
+	if blockStore.getCalls[0].chainID != blockServiceTestChainID {
+		t.Fatalf("expected first get chain_id=%d, got %d", blockServiceTestChainID, blockStore.getCalls[0].chainID)
 	}
 
-	if repo.insertBlockArg.Number != 20 {
-		t.Fatalf("expected inserted block number=20, got %d", repo.insertBlockArg.Number)
+	if blockStore.getCalls[0].number != childNumber {
+		t.Fatalf("expected first get block number=%d, got %d", childNumber, blockStore.getCalls[0].number)
 	}
 
-	if len(repo.insertTxsArg) != 0 {
-		t.Fatalf("expected 0 transactions, got %d", len(repo.insertTxsArg))
+	if blockStore.getCalls[1].chainID != blockServiceTestChainID {
+		t.Fatalf("expected second get chain_id=%d, got %d", blockServiceTestChainID, blockStore.getCalls[1].chainID)
 	}
 
-	assertInsertedBlockSyncState(
-		t,
-		repo.insertBlockArg,
-		true,
-		true,
-		models.BlockSyncStatusCompleted,
-	)
-
-	if rpc.getChainIDCalled {
-		t.Fatalf("expected GetChainID not to be called for empty block")
-	}
-
-	if receiptSyncer.called {
-		t.Fatalf("expected SyncBlockTransactionReceipts not to be called for empty block")
-	}
-
-	if receiptSyncer.calls != 0 {
-		t.Fatalf("expected 0 receipt sync calls, got %d", receiptSyncer.calls)
-	}
-
-	if repo.markBlockReceiptsSyncedCalled {
-		t.Fatalf("expected MarkBlockReceiptsSynced not to be called for empty block")
-	}
-
-	if repo.markBlockReceiptsSyncFailedCalled {
-		t.Fatalf("expected MarkBlockReceiptsSyncFailed not to be called for empty block")
+	if blockStore.getCalls[1].number != parentNumber {
+		t.Fatalf("expected second get block number=%d, got %d", parentNumber, blockStore.getCalls[1].number)
 	}
 }
 
-func TestBlockService_SyncBlockToDB_WithTransactions_SyncsReceiptsAndMarksCompleted(t *testing.T) {
-	svc, repo, rpc, receiptSyncer := setupTestServiceWithReceiptSyncer(t)
+func TestBlockService_ValidateTransactionsForSync_PassesChainIDAndHashes(t *testing.T) {
+	s, _, _, _, txConflictReader := setupBlockServiceChainIDTest()
 
-	chainID := big.NewInt(1)
-	rpc.chainID = chainID
+	txModels := []*models.Transaction{
+		{
+			ChainID:     blockServiceTestChainID,
+			Hash:        "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			BlockNumber: 100,
+			BlockHash:   "0xblockhash1",
+			TxIndex:     0,
+		},
+		{
+			ChainID:     blockServiceTestChainID,
+			Hash:        "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+			BlockNumber: 100,
+			BlockHash:   "0xblockhash1",
+			TxIndex:     1,
+		},
+	}
 
-	to := common.HexToAddress("0x2222222222222222222222222222222222222222")
-	signedTx, _ := newSignedTestTransaction(t, chainID, 1, to)
-
-	rpc.block = newTestBlockWithTransactions(20, []*ethtypes.Transaction{
-		signedTx,
-	})
-	rpc.err = nil
-
-	err := svc.SyncBlockToDB(context.Background(), 20)
+	err := s.validateTransactionsForSync(context.Background(), txModels)
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
 
-	if !repo.insertBlockWithTransactionsCalled {
-		t.Fatalf("expected InsertBlockWithTransactions to be called")
+	if !txConflictReader.called {
+		t.Fatalf("expected transaction conflict reader called")
 	}
 
-	if repo.insertBlockArg == nil {
-		t.Fatalf("expected inserted block, got nil")
+	if txConflictReader.gotChainID != blockServiceTestChainID {
+		t.Fatalf("expected chain_id=%d, got %d", blockServiceTestChainID, txConflictReader.gotChainID)
 	}
 
-	if repo.insertBlockArg.Number != 20 {
-		t.Fatalf("expected inserted block number=20, got %d", repo.insertBlockArg.Number)
+	if len(txConflictReader.gotHashes) != len(txModels) {
+		t.Fatalf("expected %d hashes, got %d", len(txModels), len(txConflictReader.gotHashes))
 	}
 
-	if len(repo.insertTxsArg) != 1 {
-		t.Fatalf("expected 1 transaction, got %d", len(repo.insertTxsArg))
-	}
-
-	assertInsertedBlockSyncState(
-		t,
-		repo.insertBlockArg,
-		true,
-		false,
-		models.BlockSyncStatusTransactionsSynced,
-	)
-
-	if !receiptSyncer.called {
-		t.Fatalf("expected SyncBlockTransactionReceipts to be called")
-	}
-
-	if receiptSyncer.calls != 1 {
-		t.Fatalf("expected 1 receipt sync call, got %d", receiptSyncer.calls)
-	}
-
-	if receiptSyncer.gotBlockNumber != 20 {
-		t.Fatalf("expected receipt sync block number=20, got %d", receiptSyncer.gotBlockNumber)
-	}
-
-	if !repo.markBlockReceiptsSyncedCalled {
-		t.Fatalf("expected MarkBlockReceiptsSynced to be called")
-	}
-
-	if repo.markBlockReceiptsSyncedBlockNumber != 20 {
-		t.Fatalf("expected MarkBlockReceiptsSynced block number=20, got %d",
-			repo.markBlockReceiptsSyncedBlockNumber,
-		)
-	}
-
-	if repo.markBlockReceiptsSyncFailedCalled {
-		t.Fatalf("expected MarkBlockReceiptsSyncFailed not to be called")
+	for i, txModel := range txModels {
+		if txConflictReader.gotHashes[i] != txModel.Hash {
+			t.Fatalf("expected hash[%d]=%s, got %s", i, txModel.Hash, txConflictReader.gotHashes[i])
+		}
 	}
 }
 
-func TestBlockService_SyncBlockToDB_ReturnsErrorAndMarksFailedWhenReceiptSyncFails(t *testing.T) {
-	svc, repo, rpc, receiptSyncer := setupTestServiceWithReceiptSyncer(t)
+func TestBlockService_ValidateTransactionsForSync_DetectsConflictWithinSameChain(t *testing.T) {
+	s, _, _, _, txConflictReader := setupBlockServiceChainIDTest()
 
-	chainID := big.NewInt(1)
-	rpc.chainID = chainID
+	hash := "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
-	to := common.HexToAddress("0x2222222222222222222222222222222222222222")
-	signedTx, _ := newSignedTestTransaction(t, chainID, 1, to)
-
-	rpc.block = newTestBlockWithTransactions(20, []*ethtypes.Transaction{
-		signedTx,
-	})
-	rpc.err = nil
-
-	receiptErr := errors.New("receipt sync error")
-	receiptSyncer.err = receiptErr
-
-	err := svc.SyncBlockToDB(context.Background(), 20)
-	if err == nil {
-		t.Fatalf("expected error, got nil")
-	}
-
-	if !errors.Is(err, receiptErr) {
-		t.Fatalf("expected receipt sync error, got %v", err)
-	}
-
-	if !strings.Contains(err.Error(), "receipt") {
-		t.Fatalf("expected wrapped receipt error, got %v", err)
-	}
-
-	if !strings.Contains(err.Error(), "block 20") {
-		t.Fatalf("expected error to include block number, got %v", err)
-	}
-
-	if !repo.insertBlockWithTransactionsCalled {
-		t.Fatalf("expected InsertBlockWithTransactions to be called")
-	}
-
-	assertInsertedBlockSyncState(
-		t,
-		repo.insertBlockArg,
-		true,
-		false,
-		models.BlockSyncStatusTransactionsSynced,
-	)
-
-	if !receiptSyncer.called {
-		t.Fatalf("expected SyncBlockTransactionReceipts to be called")
-	}
-
-	if receiptSyncer.calls != 1 {
-		t.Fatalf("expected 1 receipt sync call, got %d", receiptSyncer.calls)
-	}
-
-	if receiptSyncer.gotBlockNumber != 20 {
-		t.Fatalf("expected receipt sync block number=20, got %d", receiptSyncer.gotBlockNumber)
-	}
-
-	if !repo.markBlockReceiptsSyncFailedCalled {
-		t.Fatalf("expected MarkBlockReceiptsSyncFailed to be called")
-	}
-
-	if repo.markBlockReceiptsSyncFailedBlockNumber != 20 {
-		t.Fatalf("expected MarkBlockReceiptsSyncFailed block number=20, got %d",
-			repo.markBlockReceiptsSyncFailedBlockNumber,
-		)
-	}
-
-	if repo.markBlockReceiptsSyncFailedReason != receiptErr.Error() {
-		t.Fatalf("expected failure reason=%q, got %q",
-			receiptErr.Error(),
-			repo.markBlockReceiptsSyncFailedReason,
-		)
-	}
-
-	if repo.markBlockReceiptsSyncedCalled {
-		t.Fatalf("expected MarkBlockReceiptsSynced not to be called")
-	}
-}
-
-func TestBlockService_SyncBlockToDB_ReturnsErrorWhenMarkBlockReceiptsSyncedFails(t *testing.T) {
-	svc, repo, rpc, receiptSyncer := setupTestServiceWithReceiptSyncer(t)
-
-	chainID := big.NewInt(1)
-	rpc.chainID = chainID
-
-	to := common.HexToAddress("0x2222222222222222222222222222222222222222")
-	signedTx, _ := newSignedTestTransaction(t, chainID, 1, to)
-
-	rpc.block = newTestBlockWithTransactions(20, []*ethtypes.Transaction{
-		signedTx,
-	})
-	rpc.err = nil
-
-	markErr := errors.New("mark receipts synced error")
-	repo.markBlockReceiptsSyncedErr = markErr
-
-	err := svc.SyncBlockToDB(context.Background(), 20)
-	if err == nil {
-		t.Fatalf("expected error, got nil")
-	}
-
-	if !errors.Is(err, markErr) {
-		t.Fatalf("expected mark receipts synced error, got %v", err)
-	}
-
-	if !receiptSyncer.called {
-		t.Fatalf("expected SyncBlockTransactionReceipts to be called")
-	}
-
-	if receiptSyncer.calls != 1 {
-		t.Fatalf("expected 1 receipt sync call, got %d", receiptSyncer.calls)
-	}
-
-	if !repo.markBlockReceiptsSyncedCalled {
-		t.Fatalf("expected MarkBlockReceiptsSynced to be called")
-	}
-
-	if repo.markBlockReceiptsSyncedBlockNumber != 20 {
-		t.Fatalf("expected MarkBlockReceiptsSynced block number=20, got %d",
-			repo.markBlockReceiptsSyncedBlockNumber,
-		)
-	}
-
-	if repo.markBlockReceiptsSyncFailedCalled {
-		t.Fatalf("expected MarkBlockReceiptsSyncFailed not to be called")
-	}
-}
-
-func TestBlockService_SyncBlockToDB_ReturnsErrorWhenMarkBlockReceiptsSyncFailedFails(t *testing.T) {
-	svc, repo, rpc, receiptSyncer := setupTestServiceWithReceiptSyncer(t)
-
-	chainID := big.NewInt(1)
-	rpc.chainID = chainID
-
-	to := common.HexToAddress("0x2222222222222222222222222222222222222222")
-	signedTx, _ := newSignedTestTransaction(t, chainID, 1, to)
-
-	rpc.block = newTestBlockWithTransactions(20, []*ethtypes.Transaction{
-		signedTx,
-	})
-	rpc.err = nil
-
-	receiptErr := errors.New("receipt sync error")
-	markErr := errors.New("mark receipts sync failed error")
-
-	receiptSyncer.err = receiptErr
-	repo.markBlockReceiptsSyncFailedErr = markErr
-
-	err := svc.SyncBlockToDB(context.Background(), 20)
-	if err == nil {
-		t.Fatalf("expected error, got nil")
-	}
-
-	if !errors.Is(err, receiptErr) {
-		t.Fatalf("expected original receipt sync error, got %v", err)
-	}
-
-	if !strings.Contains(err.Error(), markErr.Error()) {
-		t.Fatalf("expected error to include mark failure %q, got %v", markErr.Error(), err)
-	}
-
-	if !repo.markBlockReceiptsSyncFailedCalled {
-		t.Fatalf("expected MarkBlockReceiptsSyncFailed to be called")
-	}
-
-	if repo.markBlockReceiptsSyncFailedBlockNumber != 20 {
-		t.Fatalf("expected MarkBlockReceiptsSyncFailed block number=20, got %d",
-			repo.markBlockReceiptsSyncFailedBlockNumber,
-		)
-	}
-
-	if repo.markBlockReceiptsSyncFailedReason != receiptErr.Error() {
-		t.Fatalf("expected failure reason=%q, got %q",
-			receiptErr.Error(),
-			repo.markBlockReceiptsSyncFailedReason,
-		)
-	}
-
-	if repo.markBlockReceiptsSyncedCalled {
-		t.Fatalf("expected MarkBlockReceiptsSynced not to be called")
-	}
-}
-
-func TestBlockService_SyncBlockToDB_AllowsInsertWhenTransactionDoesNotExist(t *testing.T) {
-	env := setupBlockServiceTestEnv(t, 20)
-
-	chainID := big.NewInt(1)
-	env.blockRPC.chainID = chainID
-
-	to := common.HexToAddress("0x2222222222222222222222222222222222222222")
-	signedTx, _ := newSignedTestTransaction(t, chainID, 1, to)
-
-	env.blockRPC.block = newTestBlockWithTransactions(20, []*ethtypes.Transaction{
-		signedTx,
-	})
-	env.blockRPC.err = nil
-
-	env.txRepo.existingTxs = map[string]*models.Transaction{}
-
-	err := env.svc.SyncBlockToDB(context.Background(), 20)
-	if err != nil {
-		t.Fatalf("expected nil error, got %v", err)
-	}
-
-	if !env.txRepo.called {
-		t.Fatalf("expected GetTransactionsByHashes to be called")
-	}
-
-	if len(env.txRepo.hashes) != 1 {
-		t.Fatalf("expected 1 hash lookup, got %d", len(env.txRepo.hashes))
-	}
-
-	if env.txRepo.hashes[0] != signedTx.Hash().Hex() {
-		t.Fatalf("expected hash=%s, got %s", signedTx.Hash().Hex(), env.txRepo.hashes[0])
-	}
-
-	if !env.blockRepo.insertBlockWithTransactionsCalled {
-		t.Fatalf("expected InsertBlockWithTransactions to be called")
-	}
-
-	if !env.receiptSyncer.called {
-		t.Fatalf("expected SyncBlockTransactionReceipts to be called")
-	}
-
-	if !env.blockRepo.markBlockReceiptsSyncedCalled {
-		t.Fatalf("expected MarkBlockReceiptsSynced to be called")
-	}
-}
-
-func TestBlockService_SyncBlockToDB_AllowsIdempotentTransactionWhenExistingLocationMatches(t *testing.T) {
-	env := setupBlockServiceTestEnv(t, 20)
-
-	chainID := big.NewInt(1)
-	env.blockRPC.chainID = chainID
-
-	to := common.HexToAddress("0x2222222222222222222222222222222222222222")
-	signedTx, _ := newSignedTestTransaction(t, chainID, 1, to)
-
-	block := newTestBlockWithTransactions(20, []*ethtypes.Transaction{
-		signedTx,
-	})
-	env.blockRPC.block = block
-	env.blockRPC.err = nil
-
-	txHash := signedTx.Hash().Hex()
-
-	env.txRepo.existingTxs = map[string]*models.Transaction{
-		txHash: {
-			Hash:        txHash,
-			BlockNumber: 20,
-			BlockHash:   block.Hash().Hex(),
+	txModels := []*models.Transaction{
+		{
+			ChainID:     blockServiceTestChainID,
+			Hash:        hash,
+			BlockNumber: 101,
+			BlockHash:   "0xnewblockhash",
 			TxIndex:     0,
 		},
 	}
 
-	err := env.svc.SyncBlockToDB(context.Background(), 20)
-	if err != nil {
-		t.Fatalf("expected nil error, got %v", err)
-	}
-
-	if !env.txRepo.called {
-		t.Fatalf("expected GetTransactionsByHashes to be called")
-	}
-
-	if !env.blockRepo.insertBlockWithTransactionsCalled {
-		t.Fatalf("expected InsertBlockWithTransactions to be called")
-	}
-
-	if len(env.blockRepo.insertTxsArg) != 1 {
-		t.Fatalf("expected 1 tx passed to InsertBlockWithTransactions, got %d", len(env.blockRepo.insertTxsArg))
-	}
-
-	if !env.receiptSyncer.called {
-		t.Fatalf("expected SyncBlockTransactionReceipts to be called")
-	}
-
-	if !env.blockRepo.markBlockReceiptsSyncedCalled {
-		t.Fatalf("expected MarkBlockReceiptsSynced to be called")
-	}
-
-	if env.blockRepo.markBlockReceiptsSyncFailedCalled {
-		t.Fatalf("expected MarkBlockReceiptsSyncFailed not to be called")
-	}
-}
-
-func TestBlockService_SyncBlockToDB_ReturnsErrChainDataConflictWhenExistingTransactionLocationDiffers(t *testing.T) {
-	env := setupBlockServiceTestEnv(t, 20)
-
-	chainID := big.NewInt(1)
-	env.blockRPC.chainID = chainID
-
-	to := common.HexToAddress("0x2222222222222222222222222222222222222222")
-	signedTx, _ := newSignedTestTransaction(t, chainID, 1, to)
-
-	block := newTestBlockWithTransactions(20, []*ethtypes.Transaction{
-		signedTx,
-	})
-	env.blockRPC.block = block
-	env.blockRPC.err = nil
-
-	txHash := signedTx.Hash().Hex()
-
-	env.txRepo.existingTxs = map[string]*models.Transaction{
-		txHash: {
-			Hash:        txHash,
-			BlockNumber: 19,
-			BlockHash:   common.HexToHash("0xoldblock").Hex(),
+	txConflictReader.existingTxs = map[string]*models.Transaction{
+		hash: {
+			ChainID:     blockServiceTestChainID,
+			Hash:        hash,
+			BlockNumber: 100,
+			BlockHash:   "0xoldblockhash",
 			TxIndex:     0,
 		},
 	}
 
-	err := env.svc.SyncBlockToDB(context.Background(), 20)
+	err := s.validateTransactionsForSync(context.Background(), txModels)
 	if err == nil {
-		t.Fatalf("expected error, got nil")
+		t.Fatalf("expected conflict error, got nil")
 	}
 
-	if !errors.Is(err, types.ErrChainDataConflict) {
-		t.Fatalf("expected ErrChainDataConflict, got %v", err)
+	if !strings.Contains(err.Error(), "transaction conflict") {
+		t.Fatalf("expected transaction conflict error, got %v", err)
 	}
 
-	if !strings.Contains(err.Error(), txHash) {
-		t.Fatalf("expected error to include tx hash %s, got %v", txHash, err)
-	}
-
-	if env.blockRepo.insertBlockWithTransactionsCalled {
-		t.Fatalf("expected InsertBlockWithTransactions not to be called")
-	}
-
-	if env.receiptSyncer.called {
-		t.Fatalf("expected SyncBlockTransactionReceipts not to be called")
-	}
-
-	if env.blockRepo.markBlockReceiptsSyncedCalled {
-		t.Fatalf("expected MarkBlockReceiptsSynced not to be called")
-	}
-
-	if env.blockRepo.markBlockReceiptsSyncFailedCalled {
-		t.Fatalf("expected MarkBlockReceiptsSyncFailed not to be called")
-	}
-}
-
-func TestBlockService_SyncBlockToDB_ReturnsErrorWhenQueryExistingTransactionsFails(t *testing.T) {
-	env := setupBlockServiceTestEnv(t, 20)
-
-	chainID := big.NewInt(1)
-	env.blockRPC.chainID = chainID
-
-	to := common.HexToAddress("0x2222222222222222222222222222222222222222")
-	signedTx, _ := newSignedTestTransaction(t, chainID, 1, to)
-
-	env.blockRPC.block = newTestBlockWithTransactions(20, []*ethtypes.Transaction{
-		signedTx,
-	})
-	env.blockRPC.err = nil
-
-	txRepoErr := errors.New("query existing txs error")
-	env.txRepo.err = txRepoErr
-
-	err := env.svc.SyncBlockToDB(context.Background(), 20)
-	if err == nil {
-		t.Fatalf("expected error, got nil")
-	}
-
-	if !errors.Is(err, txRepoErr) {
-		t.Fatalf("expected tx repo error, got %v", err)
-	}
-
-	if !strings.Contains(err.Error(), "query existing transactions by hashes") {
-		t.Fatalf("expected wrapped tx lookup error, got %v", err)
-	}
-
-	if env.blockRepo.insertBlockWithTransactionsCalled {
-		t.Fatalf("expected InsertBlockWithTransactions not to be called")
-	}
-
-	if env.receiptSyncer.called {
-		t.Fatalf("expected SyncBlockTransactionReceipts not to be called")
-	}
-}
-
-func TestBlockService_SyncBlockToDB_RetriesReceiptsFailedBlockAndMarksCompleted(t *testing.T) {
-	env := setupBlockServiceTestEnv(t, 20)
-
-	chainID := big.NewInt(1)
-	env.blockRPC.chainID = chainID
-
-	to := common.HexToAddress("0x2222222222222222222222222222222222222222")
-	signedTx, _ := newSignedTestTransaction(t, chainID, 1, to)
-
-	block := newTestBlockWithTransactions(20, []*ethtypes.Transaction{
-		signedTx,
-	})
-	env.blockRPC.block = block
-	env.blockRPC.err = nil
-
-	previousErr := "previous receipt sync error"
-
-	env.blockRepo.block = &models.Block{
-		Number:             20,
-		Hash:               block.Hash().Hex(),
-		TransactionsSynced: true,
-		ReceiptsSynced:     false,
-		SyncStatus:         models.BlockSyncStatusReceiptsFailed,
-		LastSyncError:      &previousErr,
-	}
-	env.blockRepo.found = true
-
-	txHash := signedTx.Hash().Hex()
-	env.txRepo.existingTxs = map[string]*models.Transaction{
-		txHash: {
-			Hash:        txHash,
-			BlockNumber: 20,
-			BlockHash:   block.Hash().Hex(),
-			TxIndex:     0,
-		},
-	}
-
-	err := env.svc.SyncBlockToDB(context.Background(), 20)
-	if err != nil {
-		t.Fatalf("expected nil error, got %v", err)
-	}
-
-	if !env.txRepo.called {
-		t.Fatalf("expected GetTransactionsByHashes to be called")
-	}
-
-	if len(env.txRepo.hashes) != 1 {
-		t.Fatalf("expected 1 hash lookup, got %d", len(env.txRepo.hashes))
-	}
-
-	if env.txRepo.hashes[0] != txHash {
-		t.Fatalf("expected hash=%s, got %s", txHash, env.txRepo.hashes[0])
-	}
-
-	if !env.blockRepo.insertBlockWithTransactionsCalled {
-		t.Fatalf("expected InsertBlockWithTransactions to be called")
-	}
-
-	if env.blockRepo.insertBlockArg == nil {
-		t.Fatalf("expected inserted block, got nil")
-	}
-
-	if env.blockRepo.insertBlockArg.Number != 20 {
-		t.Fatalf("expected inserted block number=20, got %d", env.blockRepo.insertBlockArg.Number)
-	}
-
-	assertInsertedBlockSyncState(
-		t,
-		env.blockRepo.insertBlockArg,
-		true,
-		false,
-		models.BlockSyncStatusTransactionsSynced,
-	)
-
-	if len(env.blockRepo.insertTxsArg) != 1 {
-		t.Fatalf("expected 1 tx passed to InsertBlockWithTransactions, got %d", len(env.blockRepo.insertTxsArg))
-	}
-
-	if !env.receiptSyncer.called {
-		t.Fatalf("expected SyncBlockTransactionReceipts to be called")
-	}
-
-	if env.receiptSyncer.calls != 1 {
-		t.Fatalf("expected 1 receipt sync call, got %d", env.receiptSyncer.calls)
-	}
-
-	if env.receiptSyncer.gotBlockNumber != 20 {
-		t.Fatalf("expected receipt sync block number=20, got %d", env.receiptSyncer.gotBlockNumber)
-	}
-
-	if !env.blockRepo.markBlockReceiptsSyncedCalled {
-		t.Fatalf("expected MarkBlockReceiptsSynced to be called")
-	}
-
-	if env.blockRepo.markBlockReceiptsSyncedBlockNumber != 20 {
-		t.Fatalf("expected MarkBlockReceiptsSynced block number=20, got %d",
-			env.blockRepo.markBlockReceiptsSyncedBlockNumber,
-		)
-	}
-
-	if env.blockRepo.markBlockReceiptsSyncFailedCalled {
-		t.Fatalf("expected MarkBlockReceiptsSyncFailed not to be called")
+	if txConflictReader.gotChainID != blockServiceTestChainID {
+		t.Fatalf("expected chain_id=%d, got %d", blockServiceTestChainID, txConflictReader.gotChainID)
 	}
 }

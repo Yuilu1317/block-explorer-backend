@@ -4,8 +4,9 @@ import "time"
 
 type Block struct {
 	ID         uint   `gorm:"primaryKey"`
-	Number     uint64 `gorm:"uniqueIndex;not null"`
-	Hash       string `gorm:"size:66;uniqueIndex;not null"`
+	ChainID    int64  `gorm:"not null;uniqueIndex:idx_blocks_chain_number;uniqueIndex:idx_blocks_chain_hash"`
+	Number     uint64 `gorm:"not null;uniqueIndex:idx_blocks_chain_number"`
+	Hash       string `gorm:"size:66;not null;uniqueIndex:idx_blocks_chain_hash"`
 	ParentHash string `gorm:"size:66;not null"`
 	Timestamp  uint64 `gorm:"not null"`
 	Miner      string `gorm:"size:42"`

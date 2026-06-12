@@ -11,8 +11,14 @@ import (
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 )
 
+const txMapperTestChainID int64 = 11155111
+
 func TestToIndexedTransactionDTO(t *testing.T) {
+	status := uint64(1)
+	gasUsed := uint64(21000)
+
 	tx := &models.Transaction{
+		ChainID:     txMapperTestChainID,
 		Hash:        "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		BlockNumber: 100,
 		BlockHash:   "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -20,6 +26,9 @@ func TestToIndexedTransactionDTO(t *testing.T) {
 
 		FromAddress: "0x1111111111111111111111111111111111111111",
 		ToAddress:   "0x2222222222222222222222222222222222222222",
+
+		ReceiptStatus:  &status,
+		ReceiptGasUsed: &gasUsed,
 
 		Nonce:       7,
 		ValueWei:    "1000000000000000000",
@@ -31,6 +40,10 @@ func TestToIndexedTransactionDTO(t *testing.T) {
 	dto := ToIndexedTransactionDTO(tx)
 	if dto == nil {
 		t.Fatal("expected dto, got nil")
+	}
+
+	if dto.ChainID != tx.ChainID {
+		t.Fatalf("expected chain_id %d, got %d", tx.ChainID, dto.ChainID)
 	}
 
 	if dto.Hash != tx.Hash {
@@ -55,6 +68,14 @@ func TestToIndexedTransactionDTO(t *testing.T) {
 
 	if dto.ToAddress != tx.ToAddress {
 		t.Fatalf("expected to address %q, got %q", tx.ToAddress, dto.ToAddress)
+	}
+
+	if dto.Status == nil || *dto.Status != status {
+		t.Fatalf("expected status %d, got %v", status, dto.Status)
+	}
+
+	if dto.GasUsed == nil || *dto.GasUsed != gasUsed {
+		t.Fatalf("expected gas used %d, got %v", gasUsed, dto.GasUsed)
 	}
 
 	if dto.Nonce != tx.Nonce {
@@ -108,9 +129,13 @@ func TestToTxDetailDTO(t *testing.T) {
 		},
 	}
 
-	dto := ToTxDetailDTO(raw)
+	dto := ToTxDetailDTO(txMapperTestChainID, raw)
 	if dto == nil {
 		t.Fatal("expected dto, got nil")
+	}
+
+	if dto.ChainID != txMapperTestChainID {
+		t.Fatalf("expected chain_id %d, got %d", txMapperTestChainID, dto.ChainID)
 	}
 
 	if dto.Hash != tx.Hash().Hex() {
@@ -185,14 +210,19 @@ func TestToTxDetailDTO_KeepsStatusZero(t *testing.T) {
 		},
 	}
 
-	dto := ToTxDetailDTO(raw)
+	dto := ToTxDetailDTO(txMapperTestChainID, raw)
 	if dto == nil {
 		t.Fatalf("expected dto, got nil")
+	}
+
+	if dto.ChainID != txMapperTestChainID {
+		t.Fatalf("expected chain_id %d, got %d", txMapperTestChainID, dto.ChainID)
 	}
 
 	if dto.Status == nil {
 		t.Fatalf("expected status, got nil")
 	}
+
 	if *dto.Status != 0 {
 		t.Fatalf("expected status=0, got %d", *dto.Status)
 	}
@@ -200,6 +230,7 @@ func TestToTxDetailDTO_KeepsStatusZero(t *testing.T) {
 	if dto.GasUsed == nil {
 		t.Fatalf("expected gas used, got nil")
 	}
+
 	if *dto.GasUsed != 21000 {
 		t.Fatalf("expected gas_used=21000, got %d", *dto.GasUsed)
 	}
@@ -224,31 +255,37 @@ func TestToTxDetailDTO_KeepsNilReceiptFieldsWhenReceiptIsNil(t *testing.T) {
 		Receipt:   nil,
 	}
 
-	dto := ToTxDetailDTO(raw)
+	dto := ToTxDetailDTO(txMapperTestChainID, raw)
 	if dto == nil {
 		t.Fatalf("expected dto, got nil")
+	}
+
+	if dto.ChainID != txMapperTestChainID {
+		t.Fatalf("expected chain_id %d, got %d", txMapperTestChainID, dto.ChainID)
 	}
 
 	if dto.Status != nil {
 		t.Fatalf("expected nil status, got %d", *dto.Status)
 	}
+
 	if dto.GasUsed != nil {
 		t.Fatalf("expected nil gas used, got %d", *dto.GasUsed)
 	}
+
 	if dto.BlockNumber != nil {
 		t.Fatalf("expected nil block number, got %d", *dto.BlockNumber)
 	}
 }
 
 func TestToTxDetailDTO_ReturnsNilWhenInputIsNil(t *testing.T) {
-	dto := ToTxDetailDTO(nil)
+	dto := ToTxDetailDTO(txMapperTestChainID, nil)
 	if dto != nil {
 		t.Fatalf("expected nil dto, got %+v", dto)
 	}
 }
 
 func TestToTxDetailDTO_ReturnsNilWhenRawTxIsNil(t *testing.T) {
-	dto := ToTxDetailDTO(&types.TxRaw{})
+	dto := ToTxDetailDTO(txMapperTestChainID, &types.TxRaw{})
 	if dto != nil {
 		t.Fatalf("expected nil dto, got %+v", dto)
 	}
@@ -275,9 +312,13 @@ func TestToTransactionModel(t *testing.T) {
 
 	txIndex := uint(2)
 
-	model := ToTransactionModel(block, tx, txIndex, from)
+	model := ToTransactionModel(txMapperTestChainID, block, tx, txIndex, from)
 	if model == nil {
 		t.Fatal("expected model, got nil")
+	}
+
+	if model.ChainID != txMapperTestChainID {
+		t.Fatalf("expected chain_id %d, got %d", txMapperTestChainID, model.ChainID)
 	}
 
 	if model.Hash != tx.Hash().Hex() {
@@ -300,8 +341,16 @@ func TestToTransactionModel(t *testing.T) {
 		t.Fatalf("expected from address %q, got %q", from.Hex(), model.FromAddress)
 	}
 
+	if model.FromAddressLower != strings.ToLower(from.Hex()) {
+		t.Fatalf("expected from address lower %q, got %q", strings.ToLower(from.Hex()), model.FromAddressLower)
+	}
+
 	if model.ToAddress != to.Hex() {
 		t.Fatalf("expected to address %q, got %q", to.Hex(), model.ToAddress)
+	}
+
+	if model.ToAddressLower != strings.ToLower(to.Hex()) {
+		t.Fatalf("expected to address lower %q, got %q", strings.ToLower(to.Hex()), model.ToAddressLower)
 	}
 
 	if model.Nonce != tx.Nonce() {
@@ -325,12 +374,50 @@ func TestToTransactionModel(t *testing.T) {
 	}
 }
 
+func TestToTransactionModel_ContractCreationHasEmptyToAddress(t *testing.T) {
+	header := &ethtypes.Header{
+		Number: big.NewInt(100),
+	}
+
+	block := ethtypes.NewBlockWithHeader(header)
+
+	from := common.HexToAddress("0x1111111111111111111111111111111111111111")
+
+	tx := ethtypes.NewContractCreation(
+		7,
+		big.NewInt(1000000000000000000),
+		21000,
+		big.NewInt(1000000000),
+		[]byte{0xab, 0xcd},
+	)
+
+	txIndex := uint(2)
+
+	model := ToTransactionModel(txMapperTestChainID, block, tx, txIndex, from)
+	if model == nil {
+		t.Fatal("expected model, got nil")
+	}
+
+	if model.ChainID != txMapperTestChainID {
+		t.Fatalf("expected chain_id %d, got %d", txMapperTestChainID, model.ChainID)
+	}
+
+	if model.ToAddress != "" {
+		t.Fatalf("expected empty to address, got %q", model.ToAddress)
+	}
+
+	if model.ToAddressLower != "" {
+		t.Fatalf("expected empty to address lower, got %q", model.ToAddressLower)
+	}
+}
+
 func newAddressMapperTestTransaction(
 	hash string,
 	from string,
 	to string,
 ) *models.Transaction {
 	return &models.Transaction{
+		ChainID:     txMapperTestChainID,
 		Hash:        hash,
 		BlockNumber: 100,
 		BlockHash:   "0xblockhash",
@@ -365,6 +452,10 @@ func TestToAddressTransactionDTO_MapsCommonFields(t *testing.T) {
 	got := ToAddressTransactionDTO(tx, strings.ToLower(queryAddress))
 	if got == nil {
 		t.Fatalf("expected dto, got nil")
+	}
+
+	if got.ChainID != tx.ChainID {
+		t.Fatalf("expected chain_id=%d, got %d", tx.ChainID, got.ChainID)
 	}
 
 	if got.Hash != tx.Hash {
@@ -422,6 +513,10 @@ func TestToAddressTransactionDTO_SelfDirection(t *testing.T) {
 		t.Fatalf("expected dto, got nil")
 	}
 
+	if got.ChainID != txMapperTestChainID {
+		t.Fatalf("expected chain_id=%d, got %d", txMapperTestChainID, got.ChainID)
+	}
+
 	if got.Direction != "self" {
 		t.Fatalf("expected direction=self, got %s", got.Direction)
 	}
@@ -440,6 +535,10 @@ func TestToAddressTransactionDTO_OutDirection(t *testing.T) {
 	got := ToAddressTransactionDTO(tx, strings.ToLower(queryAddress))
 	if got == nil {
 		t.Fatalf("expected dto, got nil")
+	}
+
+	if got.ChainID != txMapperTestChainID {
+		t.Fatalf("expected chain_id=%d, got %d", txMapperTestChainID, got.ChainID)
 	}
 
 	if got.Direction != "out" {
@@ -462,6 +561,10 @@ func TestToAddressTransactionDTO_InDirection(t *testing.T) {
 		t.Fatalf("expected dto, got nil")
 	}
 
+	if got.ChainID != txMapperTestChainID {
+		t.Fatalf("expected chain_id=%d, got %d", txMapperTestChainID, got.ChainID)
+	}
+
 	if got.Direction != "in" {
 		t.Fatalf("expected direction=in, got %s", got.Direction)
 	}
@@ -481,6 +584,10 @@ func TestToAddressTransactionDTO_UnknownDirection(t *testing.T) {
 	got := ToAddressTransactionDTO(tx, strings.ToLower(queryAddress))
 	if got == nil {
 		t.Fatalf("expected dto, got nil")
+	}
+
+	if got.ChainID != txMapperTestChainID {
+		t.Fatalf("expected chain_id=%d, got %d", txMapperTestChainID, got.ChainID)
 	}
 
 	if got.Direction != "unknown" {
@@ -508,6 +615,7 @@ func TestToIndexedTransactionDTO_PreservesReceiptStatusNilZeroOne(t *testing.T) 
 		{
 			name: "receipt not synced keeps nil status and nil gas used",
 			tx: &models.Transaction{
+				ChainID:     txMapperTestChainID,
 				Hash:        "0xpending",
 				BlockNumber: 100,
 				BlockHash:   "0xblockhash",
@@ -521,6 +629,7 @@ func TestToIndexedTransactionDTO_PreservesReceiptStatusNilZeroOne(t *testing.T) 
 		{
 			name: "failed receipt keeps status zero",
 			tx: &models.Transaction{
+				ChainID:        txMapperTestChainID,
 				Hash:           "0xfailed",
 				BlockNumber:    100,
 				BlockHash:      "0xblockhash",
@@ -538,6 +647,7 @@ func TestToIndexedTransactionDTO_PreservesReceiptStatusNilZeroOne(t *testing.T) 
 		{
 			name: "successful receipt keeps status one",
 			tx: &models.Transaction{
+				ChainID:        txMapperTestChainID,
 				Hash:           "0xsuccess",
 				BlockNumber:    100,
 				BlockHash:      "0xblockhash",
@@ -559,6 +669,10 @@ func TestToIndexedTransactionDTO_PreservesReceiptStatusNilZeroOne(t *testing.T) 
 			got := ToIndexedTransactionDTO(tt.tx)
 			if got == nil {
 				t.Fatalf("expected dto, got nil")
+			}
+
+			if got.ChainID != txMapperTestChainID {
+				t.Fatalf("expected chain_id=%d, got %d", txMapperTestChainID, got.ChainID)
 			}
 
 			if tt.wantStatusNil {
@@ -650,6 +764,10 @@ func TestToAddressTransactionDTO_PreservesReceiptStatusNilZeroOne(t *testing.T) 
 			got := ToAddressTransactionDTO(tt.tx, strings.ToLower(queryAddress))
 			if got == nil {
 				t.Fatalf("expected dto, got nil")
+			}
+
+			if got.ChainID != txMapperTestChainID {
+				t.Fatalf("expected chain_id=%d, got %d", txMapperTestChainID, got.ChainID)
 			}
 
 			if tt.wantStatusNil {

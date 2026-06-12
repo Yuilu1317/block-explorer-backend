@@ -18,7 +18,7 @@ func TestWalletController_ListCompletedBlocks_Success(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	service := &fakeWalletService{
-		resp: &types.WalletCompletedBlocksResponse{
+		completedBlocksResp: &types.WalletCompletedBlocksResponse{
 			ChainID: 11155111,
 			Blocks: []types.WalletCompletedBlock{
 				{
@@ -54,12 +54,12 @@ func TestWalletController_ListCompletedBlocks_Success(t *testing.T) {
 		t.Fatalf("expected status 200, got %d, body=%s", w.Code, w.Body.String())
 	}
 
-	if !service.called {
+	if !service.listCompletedBlocksCalled {
 		t.Fatal("expected service to be called")
 	}
 
-	if service.gotChainID != 11155111 {
-		t.Fatalf("expected chain id 11155111, got %d", service.gotChainID)
+	if service.gotListChainID != 11155111 {
+		t.Fatalf("expected chain id 11155111, got %d", service.gotListChainID)
 	}
 
 	if service.gotFromBlock != 100 {
@@ -161,7 +161,7 @@ func TestWalletController_ListCompletedBlocks_BadRequest(t *testing.T) {
 			gin.SetMode(gin.TestMode)
 
 			service := &fakeWalletService{
-				resp: &types.WalletCompletedBlocksResponse{
+				completedBlocksResp: &types.WalletCompletedBlocksResponse{
 					ChainID: 11155111,
 					Blocks:  []types.WalletCompletedBlock{},
 				},
@@ -178,7 +178,7 @@ func TestWalletController_ListCompletedBlocks_BadRequest(t *testing.T) {
 				t.Fatalf("expected status 400, got %d, body=%s", w.Code, w.Body.String())
 			}
 
-			if service.called {
+			if service.listCompletedBlocksCalled {
 				t.Fatal("expected service not to be called")
 			}
 
@@ -194,7 +194,7 @@ func TestWalletController_ListCompletedBlocks_ServiceError(t *testing.T) {
 
 	serviceErr := errors.New("service failed")
 	service := &fakeWalletService{
-		err: serviceErr,
+		completedBlocksErr: serviceErr,
 	}
 
 	router := newWalletControllerTestRouter(NewWalletController(service))
@@ -208,7 +208,7 @@ func TestWalletController_ListCompletedBlocks_ServiceError(t *testing.T) {
 
 	router.ServeHTTP(w, req)
 
-	if !service.called {
+	if !service.listCompletedBlocksCalled {
 		t.Fatal("expected service to be called")
 	}
 
@@ -236,13 +236,19 @@ func newWalletControllerTestRouter(controller *WalletController) *gin.Engine {
 }
 
 type fakeWalletService struct {
-	resp *types.WalletCompletedBlocksResponse
-	err  error
+	completedBlocksResp *types.WalletCompletedBlocksResponse
+	completedBlocksErr  error
 
-	called       bool
-	gotChainID   int64
-	gotFromBlock int64
-	gotLimit     int
+	syncStatusResp *types.GetSyncStatusResponse
+	syncStatusErr  error
+
+	listCompletedBlocksCalled bool
+	gotListChainID            int64
+	gotFromBlock              int64
+	gotLimit                  int
+
+	getSyncStatusCalled  bool
+	gotSyncStatusChainID int64
 }
 
 func (f *fakeWalletService) ListCompletedBlocks(
@@ -251,14 +257,28 @@ func (f *fakeWalletService) ListCompletedBlocks(
 	fromBlock int64,
 	limit int,
 ) (*types.WalletCompletedBlocksResponse, error) {
-	f.called = true
-	f.gotChainID = chainID
+	f.listCompletedBlocksCalled = true
+	f.gotListChainID = chainID
 	f.gotFromBlock = fromBlock
 	f.gotLimit = limit
 
-	if f.err != nil {
-		return nil, f.err
+	if f.completedBlocksErr != nil {
+		return nil, f.completedBlocksErr
 	}
 
-	return f.resp, nil
+	return f.completedBlocksResp, nil
+}
+
+func (f *fakeWalletService) GetSyncStatus(
+	ctx context.Context,
+	chainID int64,
+) (*types.GetSyncStatusResponse, error) {
+	f.getSyncStatusCalled = true
+	f.gotSyncStatusChainID = chainID
+
+	if f.syncStatusErr != nil {
+		return nil, f.syncStatusErr
+	}
+
+	return f.syncStatusResp, nil
 }

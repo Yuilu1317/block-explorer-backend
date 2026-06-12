@@ -19,3 +19,14 @@ type WalletCompletedTransaction struct {
 	AmountWei     string `json:"amount_wei"`
 	ReceiptStatus int16  `json:"receipt_status"`
 }
+
+type GetSyncStatusResponse struct {
+	ChainID              int64                  `json:"chain_id"`
+	SyncTarget           string                 `json:"sync_target"`
+	LatestCompletedBlock *CompletedBlockSummary `json:"latest_completed_block"`
+}
+
+type CompletedBlockSummary struct {
+	Number int64  `json:"number"`
+	Hash   string `json:"hash"`
+}

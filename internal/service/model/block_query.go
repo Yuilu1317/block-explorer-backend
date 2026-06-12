@@ -1,6 +1,7 @@
 package model
 
 type BlockDetail struct {
+	ChainID    int64
 	Number     uint64
 	Hash       string
 	ParentHash string

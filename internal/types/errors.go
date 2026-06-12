@@ -24,4 +24,6 @@ var (
 	ErrRequestCanceled = errors.New("request canceled")
 
 	ErrChainDataConflict = errors.New("chain data conflict")
+
+	ErrLatestCompletedBlockNotFound = errors.New("latest completed block not found")
 )

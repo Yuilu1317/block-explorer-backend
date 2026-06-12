@@ -8,37 +8,54 @@ import (
 	"block-explorer-backend/internal/types"
 )
 
+// WalletCompletedBlockReader from block_repo
 type WalletCompletedBlockReader interface {
 	ListWalletCompletedBlockRows(
 		ctx context.Context,
+		chainID int64,
 		fromBlock int64,
 		limit int,
 	) ([]models.Block, error)
 }
 
+// WalletCompletedBlockReader from tx_repo
 type WalletCompletedTransactionReader interface {
 	ListWalletCompletedTransactionRows(
 		ctx context.Context,
+		chainID int64,
 		blockNumbers []uint64,
 	) ([]models.Transaction, error)
 }
 
+type WalletSyncStatusReader interface {
+	GetLatestCompletedBlock(
+		ctx context.Context,
+		chainID int64,
+	) (*models.Block, bool, error)
+}
+
 type WalletInternalService struct {
-	chainID int64
+	chainID    int64
+	syncTarget string
 
 	walletCompletedBlockReader       WalletCompletedBlockReader
 	walletCompletedTransactionReader WalletCompletedTransactionReader
+	walletSyncStatusReader           WalletSyncStatusReader
 }
 
 func NewWalletInternalService(
 	chainID int64,
+	syncTarget string,
 	walletCompletedBlockReader WalletCompletedBlockReader,
 	walletCompletedTransactionReader WalletCompletedTransactionReader,
+	walletSyncStatusReader WalletSyncStatusReader,
 ) *WalletInternalService {
 	return &WalletInternalService{
 		chainID:                          chainID,
+		syncTarget:                       syncTarget,
 		walletCompletedBlockReader:       walletCompletedBlockReader,
 		walletCompletedTransactionReader: walletCompletedTransactionReader,
+		walletSyncStatusReader:           walletSyncStatusReader,
 	}
 }
 
@@ -60,7 +77,7 @@ func (s *WalletInternalService) ListCompletedBlocks(
 		return nil, fmt.Errorf("limit must be positive")
 	}
 
-	blocks, err := s.walletCompletedBlockReader.ListWalletCompletedBlockRows(ctx, fromBlock, limit)
+	blocks, err := s.walletCompletedBlockReader.ListWalletCompletedBlockRows(ctx, s.chainID, fromBlock, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list wallet completed block rows: %w", err)
 	}
@@ -77,7 +94,7 @@ func (s *WalletInternalService) ListCompletedBlocks(
 		blockNumbers = append(blockNumbers, block.Number)
 	}
 
-	txs, err := s.walletCompletedTransactionReader.ListWalletCompletedTransactionRows(ctx, blockNumbers)
+	txs, err := s.walletCompletedTransactionReader.ListWalletCompletedTransactionRows(ctx, s.chainID, blockNumbers)
 	if err != nil {
 		return nil, fmt.Errorf("list wallet completed transaction rows: %w", err)
 	}
@@ -131,4 +148,30 @@ func mapReceiptStatus(txHash string, status *uint64) (int16, error) {
 	}
 
 	return int16(*status), nil
+}
+
+func (s *WalletInternalService) GetSyncStatus(
+	ctx context.Context,
+	chainID int64,
+) (*types.GetSyncStatusResponse, error) {
+	if chainID != s.chainID {
+		return nil, fmt.Errorf("unexpected chain_id: got=%d expected=%d", chainID, s.chainID)
+	}
+
+	block, found, err := s.walletSyncStatusReader.GetLatestCompletedBlock(ctx, s.chainID)
+	if err != nil {
+		return nil, fmt.Errorf("get latest completed block: %w", err)
+	}
+	if !found {
+		return nil, types.ErrLatestCompletedBlockNotFound
+	}
+
+	return &types.GetSyncStatusResponse{
+		ChainID:    s.chainID,
+		SyncTarget: s.syncTarget,
+		LatestCompletedBlock: &types.CompletedBlockSummary{
+			Number: int64(block.Number),
+			Hash:   block.Hash,
+		},
+	}, nil
 }

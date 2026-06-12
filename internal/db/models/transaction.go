@@ -3,10 +3,10 @@ package models
 import "time"
 
 type Transaction struct {
-	ID uint `gorm:"primaryKey"`
-
-	Hash        string `gorm:"size:66;uniqueIndex;not null"`
-	BlockNumber uint64 `gorm:"index;not null"`
+	ID          uint   `gorm:"primaryKey"`
+	ChainID     int64  `gorm:"not null;uniqueIndex:idx_transactions_chain_hash;index:idx_transactions_chain_block_number"`
+	Hash        string `gorm:"size:66;not null;uniqueIndex:idx_transactions_chain_hash"`
+	BlockNumber uint64 `gorm:"not null;index:idx_transactions_chain_block_number"`
 	BlockHash   string `gorm:"size:66;index;not null"`
 	TxIndex     uint   `gorm:"not null"`
 

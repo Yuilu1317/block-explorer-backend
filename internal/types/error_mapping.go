@@ -85,6 +85,11 @@ func MapError(err error) (int, ErrorResponse) {
 			Code:    http.StatusConflict,
 			Message: "chain data conflict detected",
 		}
+	case errors.Is(err, ErrLatestCompletedBlockNotFound):
+		return http.StatusNotFound, ErrorResponse{
+			Code:    http.StatusNotFound,
+			Message: "latest completed block not found",
+		}
 
 	default:
 		return http.StatusInternalServerError, ErrorResponse{

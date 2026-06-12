@@ -1,6 +1,7 @@
 package types
 
 type AddressInfo struct {
+	ChainID    int64  `json:"chain_id"`
 	Address    string `json:"address"`
 	Balance    string `json:"balance"`
 	Nonce      uint64 `json:"nonce"`
@@ -8,6 +9,7 @@ type AddressInfo struct {
 }
 
 type AddressTransactionDTO struct {
+	ChainID     int64  `json:"chain_id"`
 	Hash        string `json:"hash"`
 	BlockNumber uint64 `json:"block_number"`
 	BlockHash   string `json:"block_hash"`
@@ -30,6 +32,7 @@ type AddressTransactionDTO struct {
 }
 
 type AddressTransactionListDTO struct {
+	ChainID  int64                    `json:"chain_id"`
 	Items    []*AddressTransactionDTO `json:"items"`
 	Page     int                      `json:"page"`
 	PageSize int                      `json:"page_size"`

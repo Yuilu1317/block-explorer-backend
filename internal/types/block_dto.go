@@ -1,6 +1,7 @@
 package types
 
 type BlockDetailDTO struct {
+	ChainID    int64  `json:"chain_id"`
 	Number     uint64 `json:"number"`
 	Hash       string `json:"hash"`
 	ParentHash string `json:"parent_hash"`

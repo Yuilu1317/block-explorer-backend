@@ -11,6 +11,7 @@ import (
 func MapBlockEntityToQueryResult(b *models.Block) model.BlockQueryResult {
 	return model.BlockQueryResult{
 		Block: model.BlockDetail{
+			ChainID:    b.ChainID,
 			Number:     b.Number,
 			Hash:       b.Hash,
 			ParentHash: b.ParentHash,
@@ -24,9 +25,10 @@ func MapBlockEntityToQueryResult(b *models.Block) model.BlockQueryResult {
 	}
 }
 
-func MapRPCBlockToQueryResult(b *ethtypes.Block) model.BlockQueryResult {
+func MapRPCBlockToQueryResult(chainID int64, b *ethtypes.Block) model.BlockQueryResult {
 	return model.BlockQueryResult{
 		Block: model.BlockDetail{
+			ChainID:    chainID,
 			Number:     b.NumberU64(),
 			Hash:       b.Hash().Hex(),
 			ParentHash: b.ParentHash().Hex(),
@@ -42,6 +44,7 @@ func MapRPCBlockToQueryResult(b *ethtypes.Block) model.BlockQueryResult {
 
 func MapBlockQueryResultToDTO(r model.BlockQueryResult) types.BlockDetailDTO {
 	return types.BlockDetailDTO{
+		ChainID:    r.Block.ChainID,
 		Number:     r.Block.Number,
 		Hash:       r.Block.Hash,
 		ParentHash: r.Block.ParentHash,
@@ -53,9 +56,10 @@ func MapBlockQueryResultToDTO(r model.BlockQueryResult) types.BlockDetailDTO {
 	}
 }
 
-func ToBlockModel(block *ethtypes.Block) *models.Block {
+func ToBlockModel(chainID int64, block *ethtypes.Block) *models.Block {
 
 	return &models.Block{
+		ChainID:    chainID,
 		Number:     block.NumberU64(),
 		Hash:       block.Hash().Hex(),
 		ParentHash: block.ParentHash().Hex(),

@@ -15,27 +15,31 @@ import (
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 )
 
+// ChainBlockReader from  block_rpc
 type ChainBlockReader interface {
 	GetBlockByNumber(ctx context.Context, number uint64) (*ethtypes.Block, error)
-	GetChainID(ctx context.Context) (*big.Int, error)
 }
 
+// BlockSyncStore from block_repo
 type BlockSyncStore interface {
-	GetBlockByNumber(ctx context.Context, number uint64) (*models.Block, bool, error)
+	GetBlockByNumber(ctx context.Context, chainID int64, number uint64) (*models.Block, bool, error)
 	InsertBlockWithTransactions(ctx context.Context, block *models.Block, txs []*models.Transaction) error
-	MarkBlockReceiptsSynced(ctx context.Context, blockNumber uint64) error
-	MarkBlockReceiptsSyncFailed(ctx context.Context, blockNumber uint64, reason string) error
+	MarkBlockReceiptsSynced(ctx context.Context, chainID int64, blockNumber uint64) error
+	MarkBlockReceiptsSyncFailed(ctx context.Context, chainID int64, blockNumber uint64, reason string) error
 }
 
+// BlockReceiptSyncer from tx_service
 type BlockReceiptSyncer interface {
 	SyncBlockTransactionReceipts(ctx context.Context, blockNumber uint64) error
 }
 
+// TransactionConflictReader from tx_repo
 type TransactionConflictReader interface {
-	GetTransactionsByHashes(ctx context.Context, hashes []string) (map[string]*models.Transaction, error)
+	GetTransactionsByHashes(ctx context.Context, chainID int64, hashes []string) (map[string]*models.Transaction, error)
 }
 
 type BlockService struct {
+	chainID                   int64
 	chainBlockReader          ChainBlockReader
 	blockSyncStore            BlockSyncStore
 	blockReceiptSyncer        BlockReceiptSyncer
@@ -45,6 +49,7 @@ type BlockService struct {
 }
 
 func NewBlockService(
+	chainID int64,
 	chainBlockReader ChainBlockReader,
 	blockSyncStore BlockSyncStore,
 	blockReceiptSyncer BlockReceiptSyncer,
@@ -52,6 +57,7 @@ func NewBlockService(
 	startBlock uint64,
 ) *BlockService {
 	return &BlockService{
+		chainID:                   chainID,
 		chainBlockReader:          chainBlockReader,
 		blockSyncStore:            blockSyncStore,
 		blockReceiptSyncer:        blockReceiptSyncer,
@@ -69,7 +75,7 @@ func (s *BlockService) getRawBlockByNumber(ctx context.Context, number uint64) (
 }
 
 func (s *BlockService) GetBlockByNumber(ctx context.Context, number uint64) (model.BlockQueryResult, error) {
-	dbBlock, found, err := s.blockSyncStore.GetBlockByNumber(ctx, number)
+	dbBlock, found, err := s.blockSyncStore.GetBlockByNumber(ctx, s.chainID, number)
 	if err != nil {
 		return model.BlockQueryResult{}, fmt.Errorf("get block %d from db: %w", number, err)
 	}
@@ -84,11 +90,11 @@ func (s *BlockService) GetBlockByNumber(ctx context.Context, number uint64) (mod
 		}
 		return model.BlockQueryResult{}, fmt.Errorf("get block detail by number %d: %w", number, err)
 	}
-	return mapper.MapRPCBlockToQueryResult(rpcBlock), nil
+	return mapper.MapRPCBlockToQueryResult(s.chainID, rpcBlock), nil
 }
 
 func (s *BlockService) validateBlockForSync(ctx context.Context, blockModel *models.Block) error {
-	existingBlock, found, err := s.blockSyncStore.GetBlockByNumber(ctx, blockModel.Number)
+	existingBlock, found, err := s.blockSyncStore.GetBlockByNumber(ctx, s.chainID, blockModel.Number)
 	if err != nil {
 		return fmt.Errorf("query block %d from db: %w", blockModel.Number, err)
 	}
@@ -106,7 +112,7 @@ func (s *BlockService) validateBlockForSync(ctx context.Context, blockModel *mod
 	}
 
 	if blockModel.Number > 0 {
-		parentBlock, found, err := s.blockSyncStore.GetBlockByNumber(ctx, blockModel.Number-1)
+		parentBlock, found, err := s.blockSyncStore.GetBlockByNumber(ctx, s.chainID, blockModel.Number-1)
 		if err != nil {
 			return fmt.Errorf("query parent block %d from db: %w", blockModel.Number-1, err)
 		}
@@ -135,26 +141,21 @@ func (s *BlockService) validateBlockForSync(ctx context.Context, blockModel *mod
 	return nil
 }
 
-func (s *BlockService) buildTransactionModelsFromBlock(ctx context.Context, block *ethtypes.Block) ([]*models.Transaction, error) {
+func (s *BlockService) buildTransactionModelsFromBlock(block *ethtypes.Block) ([]*models.Transaction, error) {
 	ethTxs := block.Transactions()
 	if len(ethTxs) == 0 {
 		return []*models.Transaction{}, nil
 	}
 
-	chainID, err := s.chainBlockReader.GetChainID(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("get chain id: %w", err)
-	}
-
 	txModels := make([]*models.Transaction, 0, len(ethTxs))
-	signer := ethtypes.LatestSignerForChainID(chainID)
+	signer := ethtypes.LatestSignerForChainID(big.NewInt(s.chainID))
 
 	for i, ethTx := range ethTxs {
 		from, err := ethutils.RecoverSender(signer, ethTx)
 		if err != nil {
 			return nil, fmt.Errorf("recover sender for tx %s: %w", ethTx.Hash().Hex(), err)
 		}
-		txModel := mapper.ToTransactionModel(block, ethTx, uint(i), from)
+		txModel := mapper.ToTransactionModel(s.chainID, block, ethTx, uint(i), from)
 		txModels = append(txModels, txModel)
 	}
 	return txModels, nil
@@ -173,7 +174,7 @@ func (s *BlockService) validateTransactionsForSync(
 		hashes = append(hashes, txModel.Hash)
 	}
 
-	existingTxs, err := s.transactionConflictReader.GetTransactionsByHashes(ctx, hashes)
+	existingTxs, err := s.transactionConflictReader.GetTransactionsByHashes(ctx, s.chainID, hashes)
 	if err != nil {
 		return fmt.Errorf("query existing transactions by hashes: %w", err)
 	}
@@ -209,13 +210,13 @@ func (s *BlockService) SyncBlockToDB(ctx context.Context, number uint64) error {
 		return fmt.Errorf("fetch block %d from rpc: %w", number, err)
 	}
 
-	blockModel := mapper.ToBlockModel(block)
+	blockModel := mapper.ToBlockModel(s.chainID, block)
 
 	if err := s.validateBlockForSync(ctx, blockModel); err != nil {
 		return err
 	}
 
-	txModels, err := s.buildTransactionModelsFromBlock(ctx, block)
+	txModels, err := s.buildTransactionModelsFromBlock(block)
 	if err != nil {
 		return err
 	}
@@ -242,7 +243,7 @@ func (s *BlockService) SyncBlockToDB(ctx context.Context, number uint64) error {
 	}
 
 	if err := s.blockReceiptSyncer.SyncBlockTransactionReceipts(ctx, number); err != nil {
-		if markErr := s.blockSyncStore.MarkBlockReceiptsSyncFailed(ctx, number, err.Error()); markErr != nil {
+		if markErr := s.blockSyncStore.MarkBlockReceiptsSyncFailed(ctx, s.chainID, number, err.Error()); markErr != nil {
 			return fmt.Errorf(
 				"sync receipts for block %d failed: %w; additionally failed to mark receipts sync failed: %v",
 				number,
@@ -252,7 +253,7 @@ func (s *BlockService) SyncBlockToDB(ctx context.Context, number uint64) error {
 		}
 		return fmt.Errorf("sync receipts for block %d: %w", number, err)
 	}
-	if err := s.blockSyncStore.MarkBlockReceiptsSynced(ctx, number); err != nil {
+	if err := s.blockSyncStore.MarkBlockReceiptsSynced(ctx, s.chainID, number); err != nil {
 		return fmt.Errorf("mark block %d receipts synced: %w", number, err)
 	}
 	return nil

@@ -56,6 +56,7 @@ type fakeAddressTransactionReader struct {
 	err              error
 
 	called     bool
+	gotChainID int64
 	gotAddress string
 	gotLimit   int
 	gotOffset  int
@@ -63,11 +64,13 @@ type fakeAddressTransactionReader struct {
 
 func (f *fakeAddressTransactionReader) ListTransactionsByAddress(
 	ctx context.Context,
+	chainID int64,
 	address string,
 	limit int,
 	offset int,
 ) ([]models.Transaction, error) {
 	f.called = true
+	f.gotChainID = chainID
 	f.gotAddress = address
 	f.gotLimit = limit
 	f.gotOffset = offset
@@ -78,11 +81,13 @@ func (f *fakeAddressTransactionReader) ListTransactionsByAddress(
 	return f.listTransactions, nil
 }
 
+const addressServiceTestChainID int64 = 11155111
+
 func setupAddressServiceTest() (*AddressService, *fakeAddressStateReader, *fakeAddressTransactionReader) {
 	fakeAddressStateReader := &fakeAddressStateReader{}
 	fakeAddressTransactionReader := &fakeAddressTransactionReader{}
 
-	s := NewAddressService(fakeAddressStateReader, fakeAddressTransactionReader)
+	s := NewAddressService(addressServiceTestChainID, fakeAddressStateReader, fakeAddressTransactionReader)
 
 	return s, fakeAddressStateReader, fakeAddressTransactionReader
 }
@@ -353,6 +358,10 @@ func TestAddressService_GetIndexedTransactionsByAddress_Success(t *testing.T) {
 
 	if !fakeTxRepo.called {
 		t.Fatalf("expected tx repo called")
+	}
+
+	if fakeTxRepo.gotChainID != addressServiceTestChainID {
+		t.Fatalf("expected chain_id=%d, got %d", addressServiceTestChainID, fakeTxRepo.gotChainID)
 	}
 
 	if fakeTxRepo.gotAddress != queryAddressLower {
@@ -655,6 +664,10 @@ func TestAddressService_GetIndexedTransactionsByAddress_ReturnsEmptyList(t *test
 		t.Fatalf("expected tx repo called")
 	}
 
+	if fakeTxRepo.gotChainID != addressServiceTestChainID {
+		t.Fatalf("expected chain_id=%d, got %d", addressServiceTestChainID, fakeTxRepo.gotChainID)
+	}
+
 	if fakeTxRepo.gotAddress != "0x1111111111111111111111111111111111111111" {
 		t.Fatalf("expected repo address normalized, got %s", fakeTxRepo.gotAddress)
 	}
@@ -696,6 +709,10 @@ func TestAddressService_GetIndexedTransactionsByAddress_ReturnsRepoError(t *test
 
 	if !fakeTxRepo.called {
 		t.Fatalf("expected tx repo called")
+	}
+
+	if fakeTxRepo.gotChainID != addressServiceTestChainID {
+		t.Fatalf("expected chain_id=%d, got %d", addressServiceTestChainID, fakeTxRepo.gotChainID)
 	}
 
 	if fakeTxRepo.gotLimit != 20 {

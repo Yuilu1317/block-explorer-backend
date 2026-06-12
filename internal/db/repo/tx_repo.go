@@ -47,10 +47,14 @@ func (r *TransactionRepository) InsertTransactions(ctx context.Context, txs []*m
 	return nil
 }
 
-func (r *TransactionRepository) GetTransactionByHash(ctx context.Context, hash string) (*models.Transaction, bool, error) {
+func (r *TransactionRepository) GetTransactionByHash(ctx context.Context, chainID int64, hash string) (*models.Transaction, bool, error) {
 	var tx models.Transaction
 
-	err := r.db.WithContext(ctx).Where("hash = ?", hash).Take(&tx).Error
+	err := r.db.WithContext(ctx).
+		Where("chain_id = ?", chainID).
+		Where("hash = ?", hash).
+		Take(&tx).
+		Error
 
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -59,7 +63,7 @@ func (r *TransactionRepository) GetTransactionByHash(ctx context.Context, hash s
 		if mapped := mapDBError(err); mapped != nil {
 			return nil, false, mapped
 		}
-		return nil, false, fmt.Errorf("query transaction by hash %s: %w", hash, err)
+		return nil, false, fmt.Errorf("query transaction by hash %s on chain %d: %w", hash, chainID, err)
 	}
 
 	return &tx, true, nil
@@ -67,6 +71,7 @@ func (r *TransactionRepository) GetTransactionByHash(ctx context.Context, hash s
 
 func (r *TransactionRepository) GetTransactionsByHashes(
 	ctx context.Context,
+	chainID int64,
 	hashes []string,
 ) (map[string]*models.Transaction, error) {
 	result := make(map[string]*models.Transaction, len(hashes))
@@ -77,6 +82,7 @@ func (r *TransactionRepository) GetTransactionsByHashes(
 
 	var txs []models.Transaction
 	err := r.db.WithContext(ctx).
+		Where("chain_id = ?", chainID).
 		Where("hash IN ?", hashes).
 		Find(&txs).
 		Error
@@ -96,6 +102,7 @@ func (r *TransactionRepository) GetTransactionsByHashes(
 
 func (r *TransactionRepository) ListTransactionsByAddress(
 	ctx context.Context,
+	chainID int64,
 	address string,
 	limit int,
 	offset int,
@@ -103,6 +110,7 @@ func (r *TransactionRepository) ListTransactionsByAddress(
 	txs := make([]models.Transaction, 0)
 
 	err := r.db.WithContext(ctx).
+		Where("chain_id = ?", chainID).
 		Where("from_address_lower = ? OR to_address_lower = ?", address, address).
 		Order("block_number DESC, tx_index DESC").
 		Limit(limit).
@@ -121,16 +129,24 @@ func (r *TransactionRepository) ListTransactionsByAddress(
 
 func (r *TransactionRepository) UpdateTransactionReceiptByHash(
 	ctx context.Context,
+	chainID int64,
 	hash string,
 	status *uint64,
 	gasUsed *uint64,
 ) error {
-	result := r.db.WithContext(ctx).Model(&models.Transaction{}).Where("hash = ?", hash).Updates(map[string]any{
-		"receipt_status":   status,
-		"receipt_gas_used": gasUsed,
-	})
+	result := r.db.WithContext(ctx).
+		Model(&models.Transaction{}).
+		Where("chain_id = ?", chainID).
+		Where("hash = ?", hash).
+		Updates(map[string]any{
+			"receipt_status":   status,
+			"receipt_gas_used": gasUsed,
+		})
 	if result.Error != nil {
-		return result.Error
+		if mapped := mapDBError(result.Error); mapped != nil {
+			return mapped
+		}
+		return fmt.Errorf("update transaction receipt by hash %s on chain %d: %w", hash, chainID, result.Error)
 	}
 
 	if result.RowsAffected == 0 {
@@ -141,18 +157,20 @@ func (r *TransactionRepository) UpdateTransactionReceiptByHash(
 
 func (r *TransactionRepository) ListTransactionsMissingReceiptByBlockNumber(
 	ctx context.Context,
+	chainID int64,
 	blockNumber uint64,
 ) ([]*models.Transaction, error) {
 	txs := make([]*models.Transaction, 0)
 
 	result := r.db.WithContext(ctx).
 		Model(&models.Transaction{}).
+		Where("chain_id = ?", chainID).
 		Where("block_number = ? AND (receipt_status IS NULL OR receipt_gas_used IS NULL)", blockNumber).
 		Order("tx_index ASC").
 		Find(&txs)
 
 	if result.Error != nil {
-		return nil, result.Error
+		return nil, fmt.Errorf("list transactions missing receipt by block number %d on chain %d: %w", blockNumber, chainID, result.Error)
 	}
 
 	return txs, nil
@@ -160,6 +178,7 @@ func (r *TransactionRepository) ListTransactionsMissingReceiptByBlockNumber(
 
 func (r *TransactionRepository) ListWalletCompletedTransactionRows(
 	ctx context.Context,
+	chainID int64,
 	blockNumbers []uint64,
 ) ([]models.Transaction, error) {
 	if len(blockNumbers) == 0 {
@@ -168,6 +187,7 @@ func (r *TransactionRepository) ListWalletCompletedTransactionRows(
 	var txs []models.Transaction
 	err := r.db.WithContext(ctx).
 		Model(&models.Transaction{}).
+		Where("chain_id = ?", chainID).
 		Where("block_number IN ?", blockNumbers).
 		Order("block_number ASC").
 		Order("tx_index ASC").

@@ -1,6 +1,7 @@
 package types
 
 type IndexerStatus struct {
+	ChainID    int64   `json:"chain_id"`
 	DBLatest   *uint64 `json:"db_latest"`
 	SyncTarget string  `json:"sync_target"`
 	RPCTarget  uint64  `json:"rpc_target"`
@@ -9,6 +10,7 @@ type IndexerStatus struct {
 }
 
 type IndexerOnceResult struct {
+	ChainID     int64   `json:"chain_id"`
 	DBLatest    *uint64 `json:"db_latest"`
 	SyncTarget  string  `json:"sync_target"`
 	RPCTarget   uint64  `json:"rpc_target"`

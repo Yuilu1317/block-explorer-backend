@@ -18,6 +18,10 @@ type WalletService interface {
 		fromBlock int64,
 		limit int,
 	) (*types.WalletCompletedBlocksResponse, error)
+	GetSyncStatus(
+		ctx context.Context,
+		chainID int64,
+	) (*types.GetSyncStatusResponse, error)
 }
 
 type WalletController struct {
@@ -58,6 +62,22 @@ func (ctl *WalletController) ListCompletedBlocks(c *gin.Context) {
 	}
 
 	resp, err := ctl.walletService.ListCompletedBlocks(ctx, chainID, fromBlock, limit)
+	if err != nil {
+		types.WriteError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+func (ctl *WalletController) GetSyncStatus(c *gin.Context) {
+	ctx := c.Request.Context()
+	chainID, err := parseRequiredPositiveInt64Query(c, "chain_id")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	resp, err := ctl.walletService.GetSyncStatus(ctx, chainID)
 	if err != nil {
 		types.WriteError(c, err)
 		return

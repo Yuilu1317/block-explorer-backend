@@ -13,6 +13,8 @@ import (
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 )
 
+const txServiceTestChainID int64 = 11155111
+
 type fakeTxServiceRPC struct {
 	txRaw *types.TxRaw
 	err   error
@@ -46,50 +48,65 @@ func (f *fakeTxServiceRPC) GetTransactionReceipt(ctx context.Context, hash strin
 			return nil, err
 		}
 	}
+
 	if f.receipts != nil {
 		return f.receipts[hash], nil
 	}
+
 	return nil, nil
 }
 
 type updateReceiptCall struct {
+	chainID int64
 	hash    string
 	status  *uint64
 	gasUsed *uint64
 }
+
 type fakeTxServiceRepo struct {
 	tx    *models.Transaction
 	found bool
 	err   error
 
-	called  bool
-	gotHash string
+	getCalled     bool
+	gotGetChainID int64
+	gotGetHash    string
 
-	txs            []*models.Transaction
-	listErr        error
-	listCalled     bool
-	gotBlockNumber uint64
+	txs                []*models.Transaction
+	listErr            error
+	listCalled         bool
+	gotListChainID     int64
+	gotListBlockNumber uint64
 
 	updateErr   error
 	updateCalls []updateReceiptCall
 }
 
-func (f *fakeTxServiceRepo) GetTransactionByHash(ctx context.Context, hash string) (*models.Transaction, bool, error) {
-	f.called = true
-	f.gotHash = hash
+func (f *fakeTxServiceRepo) GetTransactionByHash(
+	ctx context.Context,
+	chainID int64,
+	hash string,
+) (*models.Transaction, bool, error) {
+	f.getCalled = true
+	f.gotGetChainID = chainID
+	f.gotGetHash = hash
 
 	if f.err != nil {
 		return nil, false, f.err
 	}
+
 	return f.tx, f.found, nil
 }
 
 func (f *fakeTxServiceRepo) ListTransactionsMissingReceiptByBlockNumber(
 	ctx context.Context,
+	chainID int64,
 	blockNumber uint64,
 ) ([]*models.Transaction, error) {
 	f.listCalled = true
-	f.gotBlockNumber = blockNumber
+	f.gotListChainID = chainID
+	f.gotListBlockNumber = blockNumber
+
 	if f.listErr != nil {
 		return nil, f.listErr
 	}
@@ -99,11 +116,13 @@ func (f *fakeTxServiceRepo) ListTransactionsMissingReceiptByBlockNumber(
 
 func (f *fakeTxServiceRepo) UpdateTransactionReceiptByHash(
 	ctx context.Context,
+	chainID int64,
 	hash string,
 	status *uint64,
 	gasUsed *uint64,
 ) error {
 	f.updateCalls = append(f.updateCalls, updateReceiptCall{
+		chainID: chainID,
 		hash:    hash,
 		status:  status,
 		gasUsed: gasUsed,
@@ -122,7 +141,12 @@ func setupTxTestService(t *testing.T) (*TxService, *fakeTxServiceRepo, *fakeTxSe
 	rpc := &fakeTxServiceRPC{}
 	repo := &fakeTxServiceRepo{}
 
-	svc := NewTxService(rpc, repo, repo)
+	svc := NewTxService(
+		txServiceTestChainID,
+		rpc,
+		repo,
+		repo,
+	)
 
 	return svc, repo, rpc
 }
@@ -137,6 +161,7 @@ func validTxServiceBlockHash() string {
 
 func testTransactionModel(hash string) *models.Transaction {
 	return &models.Transaction{
+		ChainID:     txServiceTestChainID,
 		Hash:        hash,
 		BlockNumber: 100,
 		BlockHash:   validTxServiceBlockHash(),
@@ -184,7 +209,8 @@ func testReceiptForTransaction(tx *models.Transaction, status uint64, gasUsed ui
 }
 
 func TestTxService_GetIndexedTransactionByHash_Success(t *testing.T) {
-	svc, repo, _ := setupTxTestService(t)
+	svc, repo, rpc := setupTxTestService(t)
+
 	hash := validTxServiceTxHash()
 
 	repo.tx = testTransactionModel(hash)
@@ -199,12 +225,24 @@ func TestTxService_GetIndexedTransactionByHash_Success(t *testing.T) {
 		t.Fatal("expected result, got nil")
 	}
 
-	if !repo.called {
+	if !repo.getCalled {
 		t.Fatal("expected repo to be called")
 	}
 
-	if repo.gotHash != hash {
-		t.Fatalf("expected repo hash %q, got %q", hash, repo.gotHash)
+	if repo.gotGetChainID != txServiceTestChainID {
+		t.Fatalf("expected repo chain_id=%d, got %d", txServiceTestChainID, repo.gotGetChainID)
+	}
+
+	if repo.gotGetHash != hash {
+		t.Fatalf("expected repo hash %q, got %q", hash, repo.gotGetHash)
+	}
+
+	if rpc.called {
+		t.Fatal("expected rpc not to be called")
+	}
+
+	if result.ChainID != txServiceTestChainID {
+		t.Fatalf("expected result chain_id=%d, got %d", txServiceTestChainID, result.ChainID)
 	}
 
 	if result.Hash != repo.tx.Hash {
@@ -321,16 +359,24 @@ func TestTxService_GetIndexedTransactionByHash_PreservesReceiptStatusNilZeroOne(
 				t.Fatalf("expected result, got nil")
 			}
 
-			if !repo.called {
+			if !repo.getCalled {
 				t.Fatalf("expected repo to be called")
 			}
 
-			if repo.gotHash != hash {
-				t.Fatalf("expected repo hash=%s, got %s", hash, repo.gotHash)
+			if repo.gotGetChainID != txServiceTestChainID {
+				t.Fatalf("expected repo chain_id=%d, got %d", txServiceTestChainID, repo.gotGetChainID)
+			}
+
+			if repo.gotGetHash != hash {
+				t.Fatalf("expected repo hash=%s, got %s", hash, repo.gotGetHash)
 			}
 
 			if rpc.called {
 				t.Fatalf("expected rpc not to be called")
+			}
+
+			if got.ChainID != txServiceTestChainID {
+				t.Fatalf("expected result chain_id=%d, got %d", txServiceTestChainID, got.ChainID)
 			}
 
 			if got.Hash != hash {
@@ -379,7 +425,7 @@ func TestTxService_GetIndexedTransactionByHash_ReturnsErrInvalidTxHash(t *testin
 		t.Fatalf("expected nil result, got %+v", result)
 	}
 
-	if repo.called {
+	if repo.getCalled {
 		t.Fatal("expected repo not to be called")
 	}
 }
@@ -401,8 +447,12 @@ func TestTxService_GetIndexedTransactionByHash_ReturnsErrTxNotFoundWhenNotFound(
 		t.Fatalf("expected nil result, got %+v", result)
 	}
 
-	if !repo.called {
+	if !repo.getCalled {
 		t.Fatal("expected repo to be called")
+	}
+
+	if repo.gotGetChainID != txServiceTestChainID {
+		t.Fatalf("expected repo chain_id=%d, got %d", txServiceTestChainID, repo.gotGetChainID)
 	}
 }
 
@@ -423,8 +473,12 @@ func TestTxService_GetIndexedTransactionByHash_ReturnsRepoError(t *testing.T) {
 		t.Fatalf("expected nil result, got %+v", result)
 	}
 
-	if !repo.called {
+	if !repo.getCalled {
 		t.Fatal("expected repo to be called")
+	}
+
+	if repo.gotGetChainID != txServiceTestChainID {
+		t.Fatalf("expected repo chain_id=%d, got %d", txServiceTestChainID, repo.gotGetChainID)
 	}
 }
 
@@ -446,12 +500,16 @@ func TestTxService_GetIndexedTransactionByHash_NormalizesHashBeforeQuery(t *test
 		t.Fatal("expected result, got nil")
 	}
 
-	if !repo.called {
+	if !repo.getCalled {
 		t.Fatal("expected repo to be called")
 	}
 
-	if repo.gotHash != expectedHash {
-		t.Fatalf("expected repo hash %q, got %q", expectedHash, repo.gotHash)
+	if repo.gotGetChainID != txServiceTestChainID {
+		t.Fatalf("expected repo chain_id=%d, got %d", txServiceTestChainID, repo.gotGetChainID)
+	}
+
+	if repo.gotGetHash != expectedHash {
+		t.Fatalf("expected repo hash %q, got %q", expectedHash, repo.gotGetHash)
 	}
 }
 
@@ -477,6 +535,10 @@ func TestTxService_GetTxDetailByHashFromRPC_Success(t *testing.T) {
 
 	if rpc.gotHash != hash {
 		t.Fatalf("expected rpc hash %q, got %q", hash, rpc.gotHash)
+	}
+
+	if result.ChainID != txServiceTestChainID {
+		t.Fatalf("expected result chain_id=%d, got %d", txServiceTestChainID, result.ChainID)
 	}
 
 	if result.Hash != raw.Tx.Hash().Hex() {
@@ -515,6 +577,7 @@ func TestTxService_GetTxDetailByHashFromRPC_Success(t *testing.T) {
 		t.Fatalf("expected is_pending %v, got %v", raw.IsPending, result.IsPending)
 	}
 }
+
 func TestTxService_GetTxDetailByHashFromRPC_ReturnsErrInvalidTxHash(t *testing.T) {
 	svc, _, rpc := setupTxTestService(t)
 
@@ -560,6 +623,7 @@ func TestTxService_GetTxDetailByHashFromRPC_NormalizesHashBeforeQuery(t *testing
 
 	upperHash := "0x" + strings.Repeat("A", 64)
 	expectedHash := strings.ToLower(upperHash)
+
 	rpc.txRaw = testTxRaw()
 
 	result, err := svc.GetTxDetailByHashFromRPC(context.Background(), "  "+upperHash+"\n")
@@ -577,6 +641,10 @@ func TestTxService_GetTxDetailByHashFromRPC_NormalizesHashBeforeQuery(t *testing
 
 	if rpc.gotHash != expectedHash {
 		t.Fatalf("expected rpc hash %q, got %q", expectedHash, rpc.gotHash)
+	}
+
+	if result.ChainID != txServiceTestChainID {
+		t.Fatalf("expected result chain_id=%d, got %d", txServiceTestChainID, result.ChainID)
 	}
 }
 
@@ -600,6 +668,7 @@ func TestTxService_validateReceiptMatchesTransaction_ReturnsErrorWhenReceiptNil(
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
+
 	if !strings.Contains(err.Error(), "receipt is nil") {
 		t.Fatalf("expected receipt nil error, got %v", err)
 	}
@@ -616,6 +685,7 @@ func TestTxService_validateReceiptMatchesTransaction_ReturnsErrorWhenTxHashMisma
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
+
 	if !strings.Contains(err.Error(), "receipt tx hash mismatch") {
 		t.Fatalf("expected tx hash mismatch error, got %v", err)
 	}
@@ -632,6 +702,7 @@ func TestTxService_validateReceiptMatchesTransaction_ReturnsErrorWhenBlockNumber
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
+
 	if !strings.Contains(err.Error(), "receipt block number is nil") {
 		t.Fatalf("expected block number nil error, got %v", err)
 	}
@@ -648,6 +719,7 @@ func TestTxService_validateReceiptMatchesTransaction_ReturnsErrorWhenBlockNumber
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
+
 	if !strings.Contains(err.Error(), "receipt block number mismatch") {
 		t.Fatalf("expected block number mismatch error, got %v", err)
 	}
@@ -664,6 +736,7 @@ func TestTxService_validateReceiptMatchesTransaction_ReturnsErrorWhenBlockHashMi
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
+
 	if !strings.Contains(err.Error(), "receipt block hash mismatch") {
 		t.Fatalf("expected block hash mismatch error, got %v", err)
 	}
@@ -679,6 +752,7 @@ func TestTxService_SyncBlockTransactionReceipts_ReturnsListError(t *testing.T) {
 	if !errors.Is(err, listErr) {
 		t.Fatalf("expected list error, got %v", err)
 	}
+
 	if !strings.Contains(err.Error(), "service: list missing receipt transactions for block 100") {
 		t.Fatalf("expected wrapped list error, got %v", err)
 	}
@@ -686,9 +760,15 @@ func TestTxService_SyncBlockTransactionReceipts_ReturnsListError(t *testing.T) {
 	if !repo.listCalled {
 		t.Fatal("expected list to be called")
 	}
+
+	if repo.gotListChainID != txServiceTestChainID {
+		t.Fatalf("expected list chain_id=%d, got %d", txServiceTestChainID, repo.gotListChainID)
+	}
+
 	if rpc.receiptCalls != 0 {
 		t.Fatalf("expected no receipt rpc calls, got %d", rpc.receiptCalls)
 	}
+
 	if len(repo.updateCalls) != 0 {
 		t.Fatalf("expected no update calls, got %d", len(repo.updateCalls))
 	}
@@ -712,8 +792,13 @@ func TestTxService_SyncBlockTransactionReceipts_UpdatesStatusOne(t *testing.T) {
 	if !repo.listCalled {
 		t.Fatal("expected list to be called")
 	}
-	if repo.gotBlockNumber != tx.BlockNumber {
-		t.Fatalf("expected block number %d, got %d", tx.BlockNumber, repo.gotBlockNumber)
+
+	if repo.gotListChainID != txServiceTestChainID {
+		t.Fatalf("expected list chain_id=%d, got %d", txServiceTestChainID, repo.gotListChainID)
+	}
+
+	if repo.gotListBlockNumber != tx.BlockNumber {
+		t.Fatalf("expected block number %d, got %d", tx.BlockNumber, repo.gotListBlockNumber)
 	}
 
 	if rpc.receiptCalls != 1 {
@@ -725,18 +810,27 @@ func TestTxService_SyncBlockTransactionReceipts_UpdatesStatusOne(t *testing.T) {
 	}
 
 	call := repo.updateCalls[0]
+
+	if call.chainID != txServiceTestChainID {
+		t.Fatalf("expected update chain_id=%d, got %d", txServiceTestChainID, call.chainID)
+	}
+
 	if call.hash != tx.Hash {
 		t.Fatalf("expected update hash %s, got %s", tx.Hash, call.hash)
 	}
+
 	if call.status == nil {
 		t.Fatal("expected status, got nil")
 	}
+
 	if *call.status != uint64(1) {
 		t.Fatalf("expected status=1, got %d", *call.status)
 	}
+
 	if call.gasUsed == nil {
 		t.Fatal("expected gas used, got nil")
 	}
+
 	if *call.gasUsed != uint64(21000) {
 		t.Fatalf("expected gas used=21000, got %d", *call.gasUsed)
 	}
@@ -757,20 +851,32 @@ func TestTxService_SyncBlockTransactionReceipts_UpdatesStatusZero(t *testing.T) 
 		t.Fatalf("expected nil error, got %v", err)
 	}
 
+	if repo.gotListChainID != txServiceTestChainID {
+		t.Fatalf("expected list chain_id=%d, got %d", txServiceTestChainID, repo.gotListChainID)
+	}
+
 	if len(repo.updateCalls) != 1 {
 		t.Fatalf("expected 1 update call, got %d", len(repo.updateCalls))
 	}
 
 	call := repo.updateCalls[0]
+
+	if call.chainID != txServiceTestChainID {
+		t.Fatalf("expected update chain_id=%d, got %d", txServiceTestChainID, call.chainID)
+	}
+
 	if call.status == nil {
 		t.Fatal("expected status, got nil")
 	}
+
 	if *call.status != uint64(0) {
 		t.Fatalf("expected status=0, got %d", *call.status)
 	}
+
 	if call.gasUsed == nil {
 		t.Fatal("expected gas used, got nil")
 	}
+
 	if *call.gasUsed != uint64(21000) {
 		t.Fatalf("expected gas used=21000, got %d", *call.gasUsed)
 	}
@@ -789,6 +895,10 @@ func TestTxService_SyncBlockTransactionReceipts_SkipsReceiptNotFound(t *testing.
 	err := svc.SyncBlockTransactionReceipts(context.Background(), tx.BlockNumber)
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
+	}
+
+	if repo.gotListChainID != txServiceTestChainID {
+		t.Fatalf("expected list chain_id=%d, got %d", txServiceTestChainID, repo.gotListChainID)
 	}
 
 	if rpc.receiptCalls != 1 {
@@ -815,8 +925,13 @@ func TestTxService_SyncBlockTransactionReceipts_ReturnsRPCError(t *testing.T) {
 	if !errors.Is(err, rpcErr) {
 		t.Fatalf("expected rpc error, got %v", err)
 	}
+
 	if !strings.Contains(err.Error(), "service: get transaction receipt for tx") {
 		t.Fatalf("expected wrapped rpc error, got %v", err)
+	}
+
+	if repo.gotListChainID != txServiceTestChainID {
+		t.Fatalf("expected list chain_id=%d, got %d", txServiceTestChainID, repo.gotListChainID)
 	}
 
 	if len(repo.updateCalls) != 0 {
@@ -841,8 +956,13 @@ func TestTxService_SyncBlockTransactionReceipts_ReturnsValidationErrorWithoutUpd
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
+
 	if !strings.Contains(err.Error(), "service: validate transaction receipt for tx") {
 		t.Fatalf("expected wrapped validation error, got %v", err)
+	}
+
+	if repo.gotListChainID != txServiceTestChainID {
+		t.Fatalf("expected list chain_id=%d, got %d", txServiceTestChainID, repo.gotListChainID)
 	}
 
 	if len(repo.updateCalls) != 0 {
@@ -867,11 +987,20 @@ func TestTxService_SyncBlockTransactionReceipts_ReturnsUpdateError(t *testing.T)
 	if !errors.Is(err, updateErr) {
 		t.Fatalf("expected update error, got %v", err)
 	}
+
 	if !strings.Contains(err.Error(), "service: update transaction receipt for tx") {
 		t.Fatalf("expected wrapped update error, got %v", err)
 	}
 
+	if repo.gotListChainID != txServiceTestChainID {
+		t.Fatalf("expected list chain_id=%d, got %d", txServiceTestChainID, repo.gotListChainID)
+	}
+
 	if len(repo.updateCalls) != 1 {
 		t.Fatalf("expected 1 update call, got %d", len(repo.updateCalls))
+	}
+
+	if repo.updateCalls[0].chainID != txServiceTestChainID {
+		t.Fatalf("expected update chain_id=%d, got %d", txServiceTestChainID, repo.updateCalls[0].chainID)
 	}
 }

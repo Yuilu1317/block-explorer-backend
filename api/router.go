@@ -50,6 +50,7 @@ func NewRouter(
 		walletGroup := internalGroup.Group("/wallet")
 		{
 			walletGroup.GET("/completed-blocks", walletController.ListCompletedBlocks)
+			walletGroup.GET("/sync-status", walletController.GetSyncStatus)
 		}
 
 		debugGroup := internalGroup.Group("/debug")

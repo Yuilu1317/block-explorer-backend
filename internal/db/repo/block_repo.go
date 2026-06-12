@@ -30,11 +30,15 @@ func (r *BlockRepository) InsertBlock(ctx context.Context, block *models.Block) 
 	return nil
 }
 
-func (r *BlockRepository) GetLatestFullySyncedBlockNumber(ctx context.Context) (uint64, bool, error) {
+func (r *BlockRepository) GetLatestFullySyncedBlockNumber(ctx context.Context, chainID int64) (uint64, bool, error) {
+	if chainID <= 0 {
+		return 0, false, fmt.Errorf("chain_id must be positive")
+	}
 	var latestFullyNumber sql.NullInt64
 
 	err := r.db.WithContext(ctx).
 		Model(&models.Block{}).
+		Where("chain_id = ?", chainID).
 		Where("transactions_synced = ? AND receipts_synced = ?", true, true).
 		Select("MAX(number)").
 		Scan(&latestFullyNumber).
@@ -53,10 +57,13 @@ func (r *BlockRepository) GetLatestFullySyncedBlockNumber(ctx context.Context) (
 	return uint64(latestFullyNumber.Int64), true, nil
 }
 
-func (r *BlockRepository) GetBlockByNumber(ctx context.Context, number uint64) (*models.Block, bool, error) {
+func (r *BlockRepository) GetBlockByNumber(ctx context.Context, chainID int64, number uint64) (*models.Block, bool, error) {
 	var block models.Block
 
-	err := r.db.WithContext(ctx).Where("number = ?", number).Take(&block).Error
+	err := r.db.WithContext(ctx).
+		Where("chain_id = ?", chainID).
+		Where("number = ?", number).
+		Take(&block).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, false, nil
@@ -64,7 +71,7 @@ func (r *BlockRepository) GetBlockByNumber(ctx context.Context, number uint64) (
 		if mapped := mapDBError(err); mapped != nil {
 			return nil, false, mapped
 		}
-		return nil, false, fmt.Errorf("query block by number %d: %w", number, err)
+		return nil, false, fmt.Errorf("query block by number %d on chain %d: %w", number, chainID, err)
 	}
 
 	return &block, true, nil
@@ -93,9 +100,10 @@ func (r *BlockRepository) InsertBlockWithTransactions(ctx context.Context, block
 	})
 }
 
-func (r *BlockRepository) MarkBlockReceiptsSynced(ctx context.Context, blockNumber uint64) error {
+func (r *BlockRepository) MarkBlockReceiptsSynced(ctx context.Context, chainID int64, blockNumber uint64) error {
 	result := r.db.WithContext(ctx).
 		Model(&models.Block{}).
+		Where("chain_id = ?", chainID).
 		Where("number = ?", blockNumber).
 		Updates(map[string]any{
 			"receipts_synced": true,
@@ -117,9 +125,10 @@ func (r *BlockRepository) MarkBlockReceiptsSynced(ctx context.Context, blockNumb
 	return nil
 }
 
-func (r *BlockRepository) MarkBlockReceiptsSyncFailed(ctx context.Context, blockNumber uint64, reason string) error {
+func (r *BlockRepository) MarkBlockReceiptsSyncFailed(ctx context.Context, chainID int64, blockNumber uint64, reason string) error {
 	result := r.db.WithContext(ctx).
 		Model(&models.Block{}).
+		Where("chain_id = ?", chainID).
 		Where("number = ?", blockNumber).
 		Updates(map[string]any{
 			"receipts_synced": false,
@@ -140,6 +149,7 @@ func (r *BlockRepository) MarkBlockReceiptsSyncFailed(ctx context.Context, block
 
 func (r *BlockRepository) ListWalletCompletedBlockRows(
 	ctx context.Context,
+	chainID int64,
 	fromBlock int64,
 	limit int,
 ) ([]models.Block, error) {
@@ -155,6 +165,7 @@ func (r *BlockRepository) ListWalletCompletedBlockRows(
 
 	err := r.db.WithContext(ctx).
 		Model(&models.Block{}).
+		Where("chain_id = ?", chainID).
 		Where("number >= ?", fromBlockNumber).
 		Where("transactions_synced = ?", true).
 		Where("receipts_synced = ?", true).
@@ -171,4 +182,32 @@ func (r *BlockRepository) ListWalletCompletedBlockRows(
 		return nil, fmt.Errorf("list wallet completed block rows: %w", err)
 	}
 	return blocks, nil
+}
+
+func (r *BlockRepository) GetLatestCompletedBlock(
+	ctx context.Context,
+	chainID int64,
+) (*models.Block, bool, error) {
+	var block models.Block
+
+	err := r.db.WithContext(ctx).
+		Where("chain_id = ?", chainID).
+		Where("sync_status = ?", models.BlockSyncStatusCompleted).
+		Where("transactions_synced = ?", true).
+		Where("receipts_synced = ?", true).
+		Where("last_sync_error IS NULL").
+		Order("number DESC").
+		First(&block).
+		Error
+
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, false, nil
+		}
+		if mapped := mapDBError(err); mapped != nil {
+			return nil, false, mapped
+		}
+		return nil, false, fmt.Errorf("get latest completed block: %w", err)
+	}
+	return &block, true, nil
 }

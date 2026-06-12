@@ -11,7 +11,9 @@ import (
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 )
 
-func ToTransactionModel(block *ethtypes.Block,
+func ToTransactionModel(
+	chainID int64,
+	block *ethtypes.Block,
 	tx *ethtypes.Transaction,
 	txIndex uint,
 	from common.Address,
@@ -27,6 +29,7 @@ func ToTransactionModel(block *ethtypes.Block,
 	}
 
 	return &models.Transaction{
+		ChainID:     chainID,
 		Hash:        tx.Hash().Hex(),
 		BlockNumber: block.NumberU64(),
 		BlockHash:   block.Hash().Hex(),
@@ -45,7 +48,7 @@ func ToTransactionModel(block *ethtypes.Block,
 	}
 }
 
-func ToTxDetailDTO(raw *types.TxRaw) *types.TxDetailDTO {
+func ToTxDetailDTO(chainID int64, raw *types.TxRaw) *types.TxDetailDTO {
 	if raw == nil || raw.Tx == nil {
 		return nil
 	}
@@ -82,6 +85,7 @@ func ToTxDetailDTO(raw *types.TxRaw) *types.TxDetailDTO {
 	}
 
 	return &types.TxDetailDTO{
+		ChainID:     chainID,
 		Hash:        tx.Hash().Hex(),
 		FromAddress: raw.From,
 		ToAddress:   to,
@@ -103,6 +107,7 @@ func ToIndexedTransactionDTO(tx *models.Transaction) *types.IndexedTransactionDT
 	}
 
 	return &types.IndexedTransactionDTO{
+		ChainID:     tx.ChainID,
 		Hash:        tx.Hash,
 		BlockNumber: tx.BlockNumber,
 		BlockHash:   tx.BlockHash,
@@ -146,6 +151,7 @@ func ToAddressTransactionDTO(
 	}
 
 	return &types.AddressTransactionDTO{
+		ChainID:     tx.ChainID,
 		Hash:        tx.Hash,
 		BlockNumber: tx.BlockNumber,
 		BlockHash:   tx.BlockHash,

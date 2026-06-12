@@ -19,6 +19,7 @@ type AddressStateReader interface {
 type AddressTransactionReader interface {
 	ListTransactionsByAddress(
 		ctx context.Context,
+		chainID int64,
 		address string,
 		limit int,
 		offset int,
@@ -26,15 +27,18 @@ type AddressTransactionReader interface {
 }
 
 type AddressService struct {
+	chainID                  int64
 	addressStateReader       AddressStateReader
 	addressTransactionReader AddressTransactionReader
 }
 
 func NewAddressService(
+	chainID int64,
 	addressStateReader AddressStateReader,
 	addressTransactionReader AddressTransactionReader,
 ) *AddressService {
 	return &AddressService{
+		chainID:                  chainID,
 		addressStateReader:       addressStateReader,
 		addressTransactionReader: addressTransactionReader,
 	}
@@ -90,7 +94,7 @@ func (s *AddressService) GetIndexedTransactionsByAddress(
 	limit := pageSize
 	offset := (page - 1) * pageSize
 
-	txs, err := s.addressTransactionReader.ListTransactionsByAddress(ctx, address, limit, offset)
+	txs, err := s.addressTransactionReader.ListTransactionsByAddress(ctx, s.chainID, address, limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("list indexed transactions by address %s: %w", address, err)
 	}

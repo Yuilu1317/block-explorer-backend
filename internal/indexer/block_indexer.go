@@ -6,19 +6,23 @@ import (
 	"fmt"
 )
 
+// SyncTargetReader from block_rpc
 type SyncTargetReader interface {
 	GetBlockNumberByTag(ctx context.Context, tag string) (uint64, error)
 }
 
+// BlockSyncProgressReader from block_repo
 type BlockSyncProgressReader interface {
-	GetLatestFullySyncedBlockNumber(ctx context.Context) (uint64, bool, error)
+	GetLatestFullySyncedBlockNumber(ctx context.Context, chainID int64) (uint64, bool, error)
 }
 
+// BlockSynchronizer from block_service
 type BlockSynchronizer interface {
 	SyncBlockToDB(ctx context.Context, number uint64) error
 }
 
 type BlockIndexer struct {
+	chainID                 int64
 	syncTargetReader        SyncTargetReader
 	blockSyncProgressReader BlockSyncProgressReader
 	blockSynchronizer       BlockSynchronizer
@@ -27,6 +31,7 @@ type BlockIndexer struct {
 }
 
 func NewBlockIndexer(
+	chainID int64,
 	syncTargetReader SyncTargetReader,
 	blockSyncProgressReader BlockSyncProgressReader,
 	blockSynchronizer BlockSynchronizer,
@@ -34,6 +39,7 @@ func NewBlockIndexer(
 	startBlock uint64,
 ) *BlockIndexer {
 	return &BlockIndexer{
+		chainID:                 chainID,
 		syncTargetReader:        syncTargetReader,
 		blockSyncProgressReader: blockSyncProgressReader,
 		blockSynchronizer:       blockSynchronizer,
@@ -43,7 +49,7 @@ func NewBlockIndexer(
 }
 
 func (s *BlockIndexer) GetNextBlockToSync(ctx context.Context) (*types.IndexerStatus, error) {
-	dbLatest, exists, err := s.blockSyncProgressReader.GetLatestFullySyncedBlockNumber(ctx)
+	dbLatest, exists, err := s.blockSyncProgressReader.GetLatestFullySyncedBlockNumber(ctx, s.chainID)
 	if err != nil {
 		return nil, fmt.Errorf("db latest block: %w", err)
 	}
@@ -66,6 +72,7 @@ func (s *BlockIndexer) GetNextBlockToSync(ctx context.Context) (*types.IndexerSt
 	}
 
 	return &types.IndexerStatus{
+		ChainID:    s.chainID,
 		DBLatest:   dbPtr,
 		SyncTarget: s.syncTarget,
 		RPCTarget:  rpcTarget,
@@ -81,12 +88,14 @@ func (s *BlockIndexer) RunIndexerOnce(ctx context.Context) (*types.IndexerOnceRe
 	}
 
 	result := &types.IndexerOnceResult{
+		ChainID:    s.chainID,
 		DBLatest:   status.DBLatest,
 		SyncTarget: status.SyncTarget,
 		RPCTarget:  status.RPCTarget,
 		NextToSync: status.Next,
 		Synced:     false,
 	}
+
 	if !status.ShouldSync {
 		return result, nil
 	}
